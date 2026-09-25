@@ -5,6 +5,7 @@ param(
     [Alias("File")]
     [string[]]$Files = @(),
     [string]$Query,
+    [string]$SourceText,
     [ValidateSet("auto", "qa", "transform")]
     [string]$Mode = "auto",
     [string]$ArtifactType = "auto",
@@ -148,14 +149,38 @@ foreach ($filePath in $Files) {
     $resolvedFiles += (Resolve-Path -LiteralPath $filePath).Path
 }
 
+# Free-form prompts are valid source content. If -SourceText is supplied, or
+# this is a brand-new prompt-only run with no file/session, materialize the
+# text as a temporary .txt source so it flows through normal ingestion/RAG.
+$tempSourcePath = $null
+$inlineSource = $SourceText
+if (-not $inlineSource -and $resolvedFiles.Count -eq 0 -and -not $SessionId) {
+    $inlineSource = $Query
+    Write-Warn "No file or existing session supplied; treating the prompt as inline source content."
+}
+if ($inlineSource) {
+    $runtimeDir = Join-Path $RepoRoot ".runtime_inputs"
+    if (-not (Test-Path $runtimeDir)) {
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    }
+    $tempSourcePath = Join-Path $runtimeDir ("inline-" + [Guid]::NewGuid().ToString("N") + ".txt")
+    [System.IO.File]::WriteAllText($tempSourcePath, $inlineSource, [System.Text.UTF8Encoding]::new($false))
+    $resolvedFiles += $tempSourcePath
+}
+
 if ($Format.Count -eq 0) {
     $Format = @("text")
 }
 
+# Windows PowerShell 5.1 can corrupt native-process arguments that contain
+# embedded quotes. Encode the query as UTF-8 Base64 and decode it in Python.
+$queryBytes = [System.Text.Encoding]::UTF8.GetBytes($Query)
+$queryBase64 = [Convert]::ToBase64String($queryBytes)
+
 $argsList = @(
     "-m", "scripts.run_phase6",
     "--user-id", $UserId,
-    "--query", $Query,
+    "--query-b64", $queryBase64,
     "--mode", $Mode,
     "--artifact-type", $ArtifactType,
     "--audience", $Audience,
@@ -192,8 +217,15 @@ Write-Host "Formats:    $($Format -join ', ')"
 Write-Host "Input files:$([Environment]::NewLine)  $($resolvedFiles -join "`n  ")"
 Write-Host "Query:      $Query"
 
-& $Python @argsList
-$exitCode = $LASTEXITCODE
+try {
+    & $Python @argsList
+    $exitCode = $LASTEXITCODE
+}
+finally {
+    if ($tempSourcePath -and (Test-Path -LiteralPath $tempSourcePath)) {
+        Remove-Item -LiteralPath $tempSourcePath -Force -ErrorAction SilentlyContinue
+    }
+}
 
 if ($exitCode -ne 0) {
     Write-Warn "Pipeline exited with code $exitCode"
