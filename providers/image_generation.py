@@ -20,7 +20,7 @@ class HostedImageGenerationProvider:
         self.api_key = api_key
         self.model = model
         self.api_style = api_style.lower()
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="image_generation")
 
     @property
     def headers(self) -> dict[str, str]:

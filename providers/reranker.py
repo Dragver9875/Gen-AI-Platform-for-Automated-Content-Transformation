@@ -15,7 +15,7 @@ class HostedReranker:
     def __init__(self, api_url: str, api_key: str | None, *, timeout_s: float = 90.0, retries: int = 2):
         self.api_url = api_url
         self.api_key = api_key
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="reranker")
 
     def rerank(self, query: str, docs: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
         headers = {"Content-Type": "application/json"}

@@ -31,7 +31,7 @@ class HarrierEmbeddingProvider:
         self.api_style = api_style
         self.batch_size = batch_size
         self.query_instruction = query_instruction
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="harrier")
 
     @property
     def headers(self) -> dict[str, str]:

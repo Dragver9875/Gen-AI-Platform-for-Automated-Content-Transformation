@@ -28,7 +28,7 @@ class DoclingAPIProvider:
     def __init__(self, base_url: str, api_key: str | None = None, *, timeout_s: float = 180.0, retries: int = 2):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="docling")
 
     @property
     def headers(self) -> dict[str, str]:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
+
+from core.telemetry import TelemetryEvent, record_event
 
 
 
@@ -27,12 +30,16 @@ class ChromaCloudStore:
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
     def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict[str, Any]], embeddings: list[list[float]]) -> None:
-        self.collection.upsert(
-            ids=ids,
-            documents=documents,
-            metadatas=[_safe_metadata(m) for m in metadatas],
-            embeddings=embeddings,
-        )
+        started = time.perf_counter()
+        try:
+            self.collection.upsert(
+                ids=ids, documents=documents,
+                metadatas=[_safe_metadata(m) for m in metadatas], embeddings=embeddings,
+            )
+            record_event(TelemetryEvent("chroma", "upsert", (time.perf_counter()-started)*1000.0, True, 1, metadata={"count": len(ids)}))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "upsert", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
 
     def vector_query(self, query_embedding: list[float], *, top_k: int, where: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         kwargs: dict[str, Any] = {
@@ -42,7 +49,13 @@ class ChromaCloudStore:
         }
         if where:
             kwargs["where"] = where
-        result = self.collection.query(**kwargs)
+        started = time.perf_counter()
+        try:
+            result = self.collection.query(**kwargs)
+            record_event(TelemetryEvent("chroma", "query", (time.perf_counter()-started)*1000.0, True, 1, metadata={"top_k": top_k}))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "query", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
         return [
             {"id": idx, "text": text, "metadata": metadata or {}, "distance": float(distance)}
             for idx, text, metadata, distance in zip(
@@ -56,7 +69,13 @@ class ChromaCloudStore:
             kwargs["where"] = where
         if limit is not None:
             kwargs["limit"] = limit
-        result = self.collection.get(**kwargs)
+        started = time.perf_counter()
+        try:
+            result = self.collection.get(**kwargs)
+            record_event(TelemetryEvent("chroma", "get", (time.perf_counter()-started)*1000.0, True, 1))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "get", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
         return [
             {"id": idx, "text": text, "metadata": metadata or {}}
             for idx, text, metadata in zip(result["ids"], result["documents"], result["metadatas"])

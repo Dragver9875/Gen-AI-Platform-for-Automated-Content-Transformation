@@ -1,0 +1,18 @@
+{
+  "name": "sample-phase9",
+  "version": "1.0",
+  "cases": [
+    {
+      "case_id": "qa-001",
+      "user_id": "eval-user",
+      "session_id": "eval-session-001",
+      "source_paths": ["./sample.pdf"],
+      "query": "What are the main recommendations?",
+      "request_mode": "qa",
+      "top_k": 5,
+      "relevant_chunk_ids": [],
+      "transformation_config": {"artifact_type": "answer", "output_formats": ["text"], "verification_profile": "strict"},
+      "expected_formats": ["text"]
+    }
+  ]
+}

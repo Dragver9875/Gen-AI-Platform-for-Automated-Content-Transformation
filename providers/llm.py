@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from providers.http import APIClient, ProviderError
+from core.telemetry import record_usage
 
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.IGNORECASE | re.DOTALL)
@@ -36,7 +37,7 @@ class HostedLLMProvider:
         self.api_style = api_style.lower()
         self.model = model
         self.response_mode = response_mode.lower()
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="llm")
 
     @property
     def headers(self) -> dict[str, str]:
@@ -61,7 +62,16 @@ class HostedLLMProvider:
             max_tokens=max_tokens,
         )
         response = self.http.request("POST", self.api_url, headers=self.headers, json=payload)
-        text = self._extract_text(response.json())
+        response_data = response.json()
+        if isinstance(response_data, dict) and isinstance(response_data.get("usage"), dict):
+            usage = response_data["usage"]
+            record_usage(
+                "llm", "generation",
+                input_tokens=int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
+                output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
+                metadata={"model": self.model or ""},
+            )
+        text = self._extract_text(response_data)
         return self._parse_json(text)
 
     def _payload(

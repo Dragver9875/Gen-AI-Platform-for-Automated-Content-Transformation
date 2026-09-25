@@ -29,7 +29,7 @@ class SigLIPRoutingProvider:
     def __init__(self, api_url: str, api_key: str, *, timeout_s: float = 90.0, retries: int = 2):
         self.api_url = api_url
         self.api_key = api_key
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="siglip")
 
     def classify(self, path: str | Path, labels: list[str] | None = None) -> list[dict[str, float | str]]:
         data = Path(path).read_bytes()

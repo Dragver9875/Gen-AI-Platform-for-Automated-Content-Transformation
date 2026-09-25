@@ -18,7 +18,7 @@ class VLMProvider:
     def __init__(self, api_url: str, api_key: str, *, timeout_s: float = 90.0, retries: int = 2):
         self.api_url = api_url
         self.api_key = api_key
-        self.http = APIClient(timeout_s=timeout_s, retries=retries)
+        self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="vlm")
 
     def describe_file(self, path: str | Path, prompt: str | None = None) -> str:
         return self.describe_bytes(Path(path).read_bytes(), prompt=prompt)
