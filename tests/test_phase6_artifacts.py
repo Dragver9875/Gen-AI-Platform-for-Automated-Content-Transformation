@@ -156,3 +156,37 @@ def test_generated_svg_blocks_active_content(tmp_path):
         assert "forbidden" in str(exc).lower()
     else:
         raise AssertionError("unsafe SVG was not rejected")
+
+
+class PlainTextArtifactLLM(FakeLLM):
+    def __init__(self):
+        self.text_calls = 0
+
+    def generate_text(self, *, system_prompt, user_prompt, temperature, max_tokens):
+        self.text_calls += 1
+        return "Project milestone complete. Today I wrapped up a project and I’m excited to share the progress with my network."
+
+    def generate_json(self, *, system_prompt, user_prompt, schema_name, json_schema, temperature, max_tokens):
+        if schema_name == "text_artifact_ir":
+            raise AssertionError("text artifacts must not require JSON when generate_text is available")
+        return super().generate_json(
+            system_prompt=system_prompt, user_prompt=user_prompt, schema_name=schema_name,
+            json_schema=json_schema, temperature=temperature, max_tokens=max_tokens
+        )
+
+
+def test_text_artifact_prefers_plain_text_generation(tmp_path):
+    llm = PlainTextArtifactLLM()
+    generator = TextArtifactGenerator(llm)
+    content = __import__("generation.content_ir", fromlist=["ContentIR"]).ContentIR(
+        artifact_type="linkedin_post", title="Project Update", summary="I finished a project today.", sections=[], key_points=[], claims=[],
+        rendering={"tone": "professional", "audience": "general", "language": "English", "detail_level": "medium", "objective": "inform", "style": "clear"}
+    )
+    config = __import__("generation.crr", fromlist=["TransformationConfig"]).TransformationConfig(
+        artifact_type="linkedin_post", output_formats=["text"], tone="professional"
+    )
+    spec = ArtifactSpec("text", "text", media_type="text/plain", extension=".txt")
+    record = generator.generate(content, config, tmp_path, spec)
+    assert llm.text_calls == 1
+    assert record.status == "generated"
+    assert "Project milestone complete" in Path(record.path).read_text(encoding="utf-8")

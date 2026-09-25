@@ -104,6 +104,62 @@ class HostedLLMProvider:
 
         raise ProviderError("All structured-output request modes failed: " + " | ".join(failures))
 
+
+    def generate_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+    ) -> str:
+        """Generate ordinary text without imposing a JSON response format.
+
+        Text artifacts (LinkedIn posts, advisories returned as text, rewritten
+        prose, etc.) should not be forced through structured-output parsing.
+        The provider still supports both OpenAI-compatible chat endpoints and
+        Hugging Face text-generation endpoints.
+        """
+        if self.api_style == "openai":
+            payload: dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            }
+            if self.model:
+                payload["model"] = self.model
+        elif self.api_style == "hf":
+            payload = {
+                "inputs": f"SYSTEM:\n{system_prompt}\n\nUSER:\n{user_prompt}\n\nASSISTANT:\n",
+                "parameters": {
+                    "max_new_tokens": max_tokens,
+                    "temperature": temperature,
+                    "return_full_text": False,
+                },
+            }
+        else:
+            raise ProviderError(f"Unsupported LLM_API_STYLE: {self.api_style}")
+
+        response = self.http.request("POST", self.api_url, headers=self.headers, json=payload)
+        response_data = response.json()
+        if isinstance(response_data, dict) and isinstance(response_data.get("usage"), dict):
+            usage = response_data["usage"]
+            record_usage(
+                "llm",
+                "generation",
+                input_tokens=int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
+                output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
+                metadata={"model": self.model or "", "response_mode": "text"},
+            )
+        text = self._extract_text(response_data).strip()
+        if not text:
+            raise ProviderError("LLM returned an empty text response")
+        return text
+
     def _response_modes(self) -> list[str]:
         if self.api_style != "openai":
             return [self.response_mode]

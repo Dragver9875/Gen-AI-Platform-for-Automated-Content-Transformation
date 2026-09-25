@@ -605,3 +605,8 @@ LLM_RESPONSE_MODE=json_schema
 ```
 
 When the endpoint does not support the requested structured-output mode, the adapter automatically degrades from JSON Schema to JSON object and finally to prompt-constrained JSON, with Pydantic validation still enforced afterwards.
+
+
+### Phase 6 text artifact behavior
+
+Plain-text artifacts are generated through the hosted LLM's normal text mode. They are **not** forced through JSON parsing. Structured output remains in use for PDF/Typst, PPTX, SVG, and creative-image planning where an intermediate schema is required.
