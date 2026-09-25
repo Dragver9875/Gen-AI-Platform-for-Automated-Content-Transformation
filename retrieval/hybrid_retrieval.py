@@ -71,6 +71,10 @@ class HybridRetriever:
             output.append(doc)
         return output
 
+    def get_corpus(self, *, where: dict[str, Any] | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """Return indexed chunks for document-wide/hierarchical processing."""
+        return self.store.get_documents(where=where, limit=limit)
+
     def retrieve(
         self,
         query: str,

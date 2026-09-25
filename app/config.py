@@ -74,6 +74,10 @@ class Settings:
     chunk_target_chars: int
     chunk_overlap_chars: int
 
+    # Phase 3 orchestration
+    phase3_default_top_k: int
+    phase3_context_max_chars: int
+
     # HTTP
     http_timeout_s: float
     http_retries: int
@@ -108,6 +112,8 @@ class Settings:
             pdf_visual_fallback_max_pages=_env_int("PDF_VISUAL_FALLBACK_MAX_PAGES", 12),
             chunk_target_chars=_env_int("CHUNK_TARGET_CHARS", 3200),
             chunk_overlap_chars=_env_int("CHUNK_OVERLAP_CHARS", 450),
+            phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),
+            phase3_context_max_chars=_env_int("PHASE3_CONTEXT_MAX_CHARS", 60000),
             http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),
             http_retries=_env_int("HTTP_RETRIES", 2),
         )

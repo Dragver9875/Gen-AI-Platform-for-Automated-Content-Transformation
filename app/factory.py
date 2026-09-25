@@ -12,6 +12,7 @@ from providers.siglip import SigLIPRoutingProvider
 from providers.vlm import VLMProvider
 from retrieval.hybrid_retrieval import HybridRetriever
 from app.phase12 import Phase12Pipeline
+from app.phase3 import create_phase3_orchestrator
 
 
 def build_phase12(settings: Settings):
@@ -70,3 +71,13 @@ def build_phase12(settings: Settings):
     )
     retriever = HybridRetriever(store, embedder, reranker)
     return Phase12Pipeline(router, chunker, retriever)
+
+
+def build_phase3(settings: Settings, *, checkpointer=None):
+    pipeline = build_phase12(settings)
+    return create_phase3_orchestrator(
+        pipeline,
+        default_top_k=settings.phase3_default_top_k,
+        context_max_chars=settings.phase3_context_max_chars,
+        checkpointer=checkpointer,
+    )

@@ -1,10 +1,10 @@
 # Gen-AI Platform for Automated Content Transformation
 
-## Current milestone: Phase 1 + Phase 2 complete
+## Current milestone: Phase 1 + Phase 2 + Phase 3 complete
 
-This repository currently implements the **retrieval/indexing layer (Phase 1)** and the **adaptive multimodal ingestion layer (Phase 2)** of the planned API-native content transformation system.
+This repository currently implements the **retrieval/indexing layer (Phase 1)**, **adaptive multimodal ingestion layer (Phase 2)**, and **LangGraph orchestration/session layer (Phase 3)** of the planned API-native content transformation system.
 
-No ML model weights are loaded by this application. Harrier, SigLIP, VLM and Docling inference are accessed through hosted API endpoints. The only local computation is deterministic orchestration such as file inspection, chunking, BM25, RRF and metadata handling.
+No ML model weights are loaded by this application. Harrier, SigLIP, VLM and Docling inference are accessed through hosted API endpoints. Local computation is deterministic control-plane logic such as file inspection, chunking, BM25, RRF, LangGraph routing, context assembly and metadata handling.
 
 ## Implemented architecture
 
@@ -82,6 +82,59 @@ Standalone images are classified by a hosted SigLIP endpoint:
 
 All branches converge into the same `IngestionResult` / `SourceElement` schema before chunking.
 
+## Phase 3 — LangGraph orchestration and session flow
+
+Implemented:
+
+- Typed, checkpoint-compatible `AgentState`.
+- Thread/session continuation using LangGraph `thread_id`.
+- In-memory development checkpointer by default; production checkpointers can be injected at graph construction.
+- Upload/index-only workflow.
+- Multi-turn reuse of previously indexed sources without re-ingestion.
+- Deterministic Phase 3 intent router with explicit `qa` / `transform` overrides.
+- QA branch using Phase 1 hybrid Top-K retrieval.
+- Whole-document transformation branch using all indexed chunks with structural ordering.
+- Hierarchical grouping by source and section.
+- Provenance-rich bounded context construction.
+- Error states for missing sources / failed ingestion.
+- Explicit `phase4_ready` handoff without prematurely implementing SLM generation.
+
+### Phase 3 graph
+
+```text
+START
+  |
+  v
+initialize
+  |
+  +-- pending files --> ingest_sources --> classify_intent
+  |                                      |
+  +------------------> classify_intent ---+
+                                         |
+                         +---------------+----------------+
+                         |               |                |
+                        QA          TRANSFORM        INDEX ONLY
+                         |               |                |
+                    hybrid Top-K     full corpus      finalize
+                         |          hierarchical          |
+                         +-------+-------+                |
+                                 |                        |
+                                 v                        |
+                           build_context                  |
+                                 |                        |
+                                 +-----------+------------+
+                                             |
+                                             v
+                                            END
+```
+
+`build_context` produces both:
+
+1. `context_groups`: the complete structured retrieval result for Phase 4 hierarchical generation, and
+2. `prepared_context`: a bounded source/page/section-aware text representation suitable for a direct downstream model call when the corpus fits.
+
+The transformation branch intentionally does **not** summarize the document in Phase 3. SLM generation and CRR construction belong to Phase 4.
+
 ## API contracts
 
 ### Docling
@@ -140,6 +193,13 @@ cp .env.example .env
 
 Export/load the `.env` values in your deployment environment.
 
+Phase 3 optional settings:
+
+```text
+PHASE3_DEFAULT_TOP_K=5
+PHASE3_CONTEXT_MAX_CHARS=60000
+```
+
 Required services:
 
 1. Chroma Cloud database.
@@ -159,6 +219,36 @@ result, chunks = pipeline.ingest_and_index("report.pdf", session_id="session-1")
 hits = pipeline.retrieve("What are the main recommendations?", session_id="session-1", source_id=result.source_id)
 ```
 
+Phase 3 LangGraph API:
+
+```python
+from app.config import Settings
+from app.factory import build_phase3
+
+agent = build_phase3(Settings.from_env())
+
+# First turn: ingest/index only.
+agent.invoke(
+    session_id="session-1",
+    source_paths=["report.pdf"],
+)
+
+# Later turn on the same LangGraph thread: no re-ingestion.
+state = agent.invoke(
+    session_id="session-1",
+    query="What mitigations are recommended?",
+)
+print(state["prepared_context"])
+
+# Whole-document route.
+state = agent.invoke(
+    session_id="session-1",
+    query="Summarize the complete report into an executive briefing",
+    request_mode="transform",
+)
+print(state["context_groups"])
+```
+
 ## CLI smoke test
 
 ```bash
@@ -176,6 +266,18 @@ This performs:
 7. RRF,
 8. Top-K output.
 
+## Phase 3 CLI
+
+```bash
+python -m scripts.run_phase3 \
+  --session-id demo-session \
+  --file ./sample.pdf \
+  --query "Summarize the complete report" \
+  --mode transform
+```
+
+The CLI prints routing, ingestion, retrieval and Phase-4-handoff statistics; it does not generate final content yet.
+
 ## Tests
 
 Unit tests use mock providers and require no API keys:
@@ -188,13 +290,11 @@ pytest -q
 
 The following intentionally belong to later phases:
 
-- LangGraph orchestration/state graph.
-- Query-vs-whole-document transformation router.
-- General-purpose SLM generation.
-- Canonical Response Representation (CRR).
-- Factuality verification/repair loop.
-- Text/PDF/PPTX/image output decoders and serializers.
-- Production frontend/authentication.
+- **Phase 4:** general-purpose SLM generation and Canonical Response Representation (CRR).
+- **Phase 5:** factuality verification and repair loop.
+- **Phase 6:** text/PDF/PPTX/image output decoders and serializers.
+- **Phase 7:** production frontend/API/authentication.
+- **Phase 8:** deployment hardening, evaluation and observability.
 
 ## Security
 
