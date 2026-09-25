@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 
 
 @dataclass
@@ -38,7 +38,7 @@ class PdfPreflight:
         self.image_coverage_threshold = image_coverage_threshold
 
     def inspect(self, path: str | Path) -> PdfProfile:
-        doc = fitz.open(path)
+        doc = pymupdf.open(path)
         profiles: list[PdfPageProfile] = []
         try:
             for page_number, page in enumerate(doc, start=1):
@@ -67,7 +67,7 @@ class PdfPreflight:
 
     @staticmethod
     def render_page_png(path: str | Path, page_number: int, *, dpi: int = 144) -> bytes:
-        doc = fitz.open(path)
+        doc = pymupdf.open(path)
         try:
             page = doc[page_number - 1]
             pix = page.get_pixmap(dpi=dpi, alpha=False)

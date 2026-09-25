@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf
 from pptx import Presentation
 
 from providers.http import APIClient, ProviderError
@@ -112,13 +112,13 @@ class DoclingAPIProvider:
         }
 
     def _convert_pdf(self, path: Path) -> list[tuple[int, str]]:
-        document = fitz.open(path)
+        document = pymupdf.open(path)
         pages: list[tuple[int, str]] = []
         try:
             for index in range(document.page_count):
                 page = document.load_page(index)
                 scale = self.render_dpi / 72.0
-                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
                 png = pix.tobytes("png")
                 pages.append((index + 1, self._convert_image_bytes(png, ".png")))
         finally:
