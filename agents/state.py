@@ -35,6 +35,12 @@ class AgentState(TypedDict, total=False):
     context_groups: list[dict[str, Any]]
     prepared_context: str
 
+    # Phase 4 generation
+    transformation_config: dict[str, Any]
+    canonical_response: dict[str, Any]
+    section_digests: list[dict[str, Any]]
+    generation_metadata: dict[str, Any]
+
     status: str
     warnings: list[str]
     errors: list[str]

@@ -13,7 +13,10 @@ from providers.vlm import VLMProvider
 from retrieval.hybrid_retrieval import HybridRetriever
 from app.phase12 import Phase12Pipeline
 from app.phase3 import create_phase3_orchestrator
+from app.phase4 import create_phase4_orchestrator
 from app.sessions import InMemorySessionStore, PostgresSessionStore, UserSessionManager
+from generation.service import GenerationService
+from providers.llm import HostedLLMProvider
 
 
 def build_phase12(settings: Settings):
@@ -92,6 +95,37 @@ def build_phase3(settings: Settings, *, checkpointer=None):
     sessions = build_session_manager(settings)
     return create_phase3_orchestrator(
         pipeline,
+        default_top_k=settings.phase3_default_top_k,
+        context_max_chars=settings.phase3_context_max_chars,
+        checkpointer=checkpointer,
+        session_manager=sessions,
+    )
+
+
+def build_phase4(settings: Settings, *, checkpointer=None):
+    if not settings.llm_api_url or not settings.llm_api_key:
+        raise ValueError("LLM_API_URL and LLM_API_KEY are required for Phase 4")
+    pipeline = build_phase12(settings)
+    sessions = build_session_manager(settings)
+    llm = HostedLLMProvider(
+        settings.llm_api_url,
+        settings.llm_api_key,
+        api_style=settings.llm_api_style,
+        model=settings.llm_model,
+        response_mode=settings.llm_response_mode,
+        timeout_s=settings.http_timeout_s,
+        retries=settings.http_retries,
+    )
+    generator = GenerationService(
+        llm,
+        temperature=settings.phase4_temperature,
+        max_tokens=settings.phase4_max_tokens,
+        group_context_max_chars=settings.phase4_group_context_max_chars,
+        digest_max_tokens=settings.phase4_digest_max_tokens,
+    )
+    return create_phase4_orchestrator(
+        pipeline,
+        generator,
         default_top_k=settings.phase3_default_top_k,
         context_max_chars=settings.phase3_context_max_chars,
         checkpointer=checkpointer,

@@ -340,3 +340,87 @@ python -m scripts.manage_sessions --user-id user-123 list
 python -m scripts.manage_sessions --user-id user-123 rename SESSION_ID "New title"
 python -m scripts.manage_sessions --user-id user-123 delete SESSION_ID
 ```
+
+---
+
+## Phase 4 — Hosted SLM Generation + Canonical Response Representation
+
+Phase 4 extends the Phase 3 retrieval/context handoff into grounded content generation. No model weights are loaded by the repository.
+
+### Generation paths
+
+**QA path**
+
+```text
+Harrier/BM25 retrieval → provenance-rich context → hosted SLM → CRR
+```
+
+**Whole-document transformation path**
+
+```text
+Full hierarchical corpus
+    ↓
+section-by-section grounded digests
+    ↓
+hierarchical synthesis
+    ↓
+Canonical Response Representation (CRR)
+```
+
+The hierarchical path avoids reducing a long report to a small Top-K context window before transformation.
+
+### Canonical Response Representation
+
+The CRR is a format-independent Pydantic schema containing:
+
+- artifact type
+- title and summary
+- structured sections and bullets
+- key points
+- factual claims with chunk-level evidence IDs
+- rendering/audience/tone/language hints
+- explicit evidence insufficiencies
+
+Phase 4 validates JSON shape and removes references to chunk IDs that are not present in the active retrieval context. **Semantic claim verification is intentionally Phase 5.**
+
+### Hosted SLM provider
+
+`providers/llm.py` supports:
+
+- `LLM_API_STYLE=openai`: OpenAI-compatible chat-completions endpoints
+- `LLM_API_STYLE=hf`: Hugging Face/dedicated text-generation endpoints
+
+The URL is treated as the exact POST endpoint, so the application is not coupled to a specific hosting vendor.
+
+Required Phase 4 environment variables:
+
+```env
+LLM_API_URL=https://your-hosted-slm-endpoint.example/v1/chat/completions
+LLM_API_KEY=...
+LLM_API_STYLE=openai
+LLM_MODEL=granite-4-h-micro
+LLM_RESPONSE_MODE=json_object
+PHASE4_TEMPERATURE=0.1
+PHASE4_MAX_TOKENS=4096
+PHASE4_GROUP_CONTEXT_MAX_CHARS=18000
+PHASE4_DIGEST_MAX_TOKENS=2048
+```
+
+`LLM_MODEL` is optional for endpoints that bind a model at deployment time.
+
+### CLI example
+
+```bash
+python -m scripts.run_phase4 \
+  --user-id user-123 \
+  --session-id report-session \
+  --file report.pdf \
+  --query "Convert the complete report into an executive summary" \
+  --mode transform \
+  --artifact-type executive_summary \
+  --audience leadership \
+  --tone professional \
+  --language English
+```
+
+Phase 4 ends with `state["canonical_response"]`. Phase 5 should consume that CRR and perform semantic evidence verification plus repair.

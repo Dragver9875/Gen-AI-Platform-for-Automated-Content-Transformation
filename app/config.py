@@ -85,6 +85,17 @@ class Settings:
     phase3_default_top_k: int
     phase3_context_max_chars: int
 
+    # Phase 4 hosted SLM + CRR generation
+    llm_api_url: str | None
+    llm_api_key: str | None
+    llm_api_style: str
+    llm_model: str | None
+    llm_response_mode: str
+    phase4_temperature: float
+    phase4_max_tokens: int
+    phase4_group_context_max_chars: int
+    phase4_digest_max_tokens: int
+
     # HTTP
     http_timeout_s: float
     http_retries: int
@@ -126,6 +137,15 @@ class Settings:
             chunk_overlap_chars=_env_int("CHUNK_OVERLAP_CHARS", 450),
             phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),
             phase3_context_max_chars=_env_int("PHASE3_CONTEXT_MAX_CHARS", 60000),
+            llm_api_url=_env("LLM_API_URL"),
+            llm_api_key=_env("LLM_API_KEY"),
+            llm_api_style=(_env("LLM_API_STYLE", "openai") or "openai").lower(),
+            llm_model=_env("LLM_MODEL"),
+            llm_response_mode=(_env("LLM_RESPONSE_MODE", "json_object") or "json_object").lower(),
+            phase4_temperature=_env_float("PHASE4_TEMPERATURE", 0.1),
+            phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),
+            phase4_group_context_max_chars=_env_int("PHASE4_GROUP_CONTEXT_MAX_CHARS", 18000),
+            phase4_digest_max_tokens=_env_int("PHASE4_DIGEST_MAX_TOKENS", 2048),
             http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),
             http_retries=_env_int("HTTP_RETRIES", 2),
         )
