@@ -437,3 +437,19 @@ ingest -> chunk -> Harrier/Chroma -> retrieve -> CRR -> verify -> repair (bounde
 ```
 
 Run with `python -m scripts.run_phase5 ...`.
+
+## Phase 6 — Generic artifact generation
+
+Phase 6 is implemented. It preserves the existing QA-vs-transform LangGraph topology and adds one post-verification `generate_artifacts` node.
+
+Generic-service refactors included in this phase:
+
+- capability-based `ProviderRegistry`
+- registrable input processors
+- configurable dense/lexical/hybrid retrieval
+- named verification profiles
+- service-level `TaskSpec`
+- CRR → `ContentIR` → format-specific `ArtifactIR`
+- configuration-driven `ArtifactRegistry`
+
+Supported Phase 6 artifact families are text, PDF, editable PPTX, factual SVG/infographic, and creative images through an optional hosted image-generation API. See `PHASE6.md`.

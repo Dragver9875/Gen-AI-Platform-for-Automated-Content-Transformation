@@ -136,11 +136,13 @@ class Phase3Nodes:
     def retrieve_qa(self, state: AgentState) -> dict[str, Any]:
         selected = list(state.get("selected_source_ids") or state.get("active_source_ids") or [])
         where = _where(state["user_id"], state["session_id"], selected)
-        docs = self.pipeline.retriever.retrieve(
-            str(state.get("query") or ""),
-            where=where,
-            final_k=int(state.get("top_k") or self.default_top_k),
-        )
+        retrieval_kwargs: dict[str, Any] = {
+            "where": where,
+            "final_k": int(state.get("top_k") or self.default_top_k),
+        }
+        if state.get("retrieval_config"):
+            retrieval_kwargs["config"] = state.get("retrieval_config")
+        docs = self.pipeline.retriever.retrieve(str(state.get("query") or ""), **retrieval_kwargs)
         return {
             "retrieved_documents": docs,
             "retrieval_mode": "hybrid_top_k",

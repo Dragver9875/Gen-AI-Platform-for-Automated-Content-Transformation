@@ -146,6 +146,7 @@ class Phase5Orchestrator(Phase4Orchestrator):
         top_k: int | None = None,
         session_title: str | None = None,
         transformation_config: TransformationConfig | dict[str, Any] | None = None,
+        retrieval_config: dict[str, Any] | None = None,
     ) -> AgentState:
         user_id = user_id.strip()
         if not user_id:
@@ -171,6 +172,7 @@ class Phase5Orchestrator(Phase4Orchestrator):
             "selected_source_ids": list(selected_source_ids or []),
             "top_k": int(top_k or self.default_top_k),
             "transformation_config": config_obj.model_dump(mode="json"),
+            "retrieval_config": dict(retrieval_config or {}),
             "retrieved_documents": [],
             "context_groups": [],
             "prepared_context": "",
@@ -182,6 +184,8 @@ class Phase5Orchestrator(Phase4Orchestrator):
             "verification_requires_repair": False,
             "repair_attempts": 0,
             "max_repair_attempts": self.max_repair_attempts,
+            "artifacts": [],
+            "artifact_metadata": {},
             "warnings": [],
             "errors": [],
         }

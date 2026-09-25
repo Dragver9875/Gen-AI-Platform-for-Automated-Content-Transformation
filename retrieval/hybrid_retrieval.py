@@ -9,6 +9,7 @@ from providers.harrier import HarrierEmbeddingProvider
 from providers.reranker import HostedReranker
 from retrieval.fusion import reciprocal_rank_fusion
 from retrieval.bm25 import BM25OkapiLite
+from retrieval.config import RetrievalConfig
 
 
 def _tokenize(text: str) -> list[str]:
@@ -28,10 +29,12 @@ class HybridRetriever:
         store: ChromaCloudStore,
         embedder: HarrierEmbeddingProvider,
         reranker: HostedReranker | None = None,
+        default_config: RetrievalConfig | None = None,
     ):
         self.store = store
         self.embedder = embedder
         self.reranker = reranker
+        self.default_config = default_config or RetrievalConfig()
 
     def index_chunks(self, chunks: list[dict[str, Any]]) -> int:
         if not chunks:
@@ -80,13 +83,27 @@ class HybridRetriever:
         query: str,
         *,
         where: dict[str, Any] | None = None,
-        bm25_k: int = 15,
-        vector_k: int = 15,
-        final_k: int = 5,
+        bm25_k: int | None = None,
+        vector_k: int | None = None,
+        final_k: int | None = None,
+        config: RetrievalConfig | dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        sparse = self.bm25_search(query, top_k=bm25_k, where=where)
-        dense = self.vector_search(query, top_k=vector_k, where=where)
-        fused = reciprocal_rank_fusion([sparse, dense])
-        if self.reranker and fused:
-            return self.reranker.rerank(query, fused, final_k)
-        return fused[:final_k]
+        cfg = (config if isinstance(config, RetrievalConfig) else RetrievalConfig.model_validate(config or self.default_config.model_dump()))
+        if bm25_k is not None:
+            cfg = cfg.model_copy(update={"bm25_k": bm25_k})
+        if vector_k is not None:
+            cfg = cfg.model_copy(update={"vector_k": vector_k})
+        if final_k is not None:
+            cfg = cfg.model_copy(update={"final_k": final_k})
+
+        ranked: list[list[dict[str, Any]]] = []
+        if cfg.strategy in {"hybrid", "lexical"}:
+            ranked.append(self.bm25_search(query, top_k=cfg.bm25_k, where=where))
+        if cfg.strategy in {"hybrid", "dense"}:
+            ranked.append(self.vector_search(query, top_k=cfg.vector_k, where=where))
+        if not ranked:
+            return []
+        fused = ranked[0] if len(ranked) == 1 else reciprocal_rank_fusion(ranked, k=cfg.rrf_k)
+        if self.reranker and cfg.use_reranker and fused:
+            return self.reranker.rerank(query, fused, cfg.final_k)
+        return fused[: cfg.final_k]

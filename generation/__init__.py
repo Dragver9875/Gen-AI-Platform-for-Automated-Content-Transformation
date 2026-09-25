@@ -1,6 +1,5 @@
-"""Phase 4 content-generation primitives."""
+"""Phase 4 content-generation primitives.
 
-from generation.crr import CanonicalResponse, TransformationConfig
-from generation.service import GenerationService
-
-__all__ = ["CanonicalResponse", "TransformationConfig", "GenerationService"]
+Import concrete classes from their modules (generation.crr, generation.service) to
+avoid package-level circular imports as later phases compose graph nodes.
+"""

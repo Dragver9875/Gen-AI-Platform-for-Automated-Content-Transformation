@@ -12,6 +12,7 @@ from ingestion.preflight import PdfPreflight
 from providers.docling import DoclingAPIProvider
 from providers.siglip import SigLIPRoutingProvider
 from providers.vlm import VLMProvider
+from ingestion.registry import IngestionProcessorRegistry
 
 
 _TEXT_SUFFIXES = {".txt", ".md"}
@@ -42,27 +43,32 @@ class IngestionRouter:
             "numbers, chart trends, diagram relationships, and important visual content. "
             "If it is primarily a scanned text page, transcribe the meaningful content."
         )
+        self.processors = IngestionProcessorRegistry()
+        self.processors.register("text", _TEXT_SUFFIXES, self._ingest_text)
+        self.processors.register("document", _DOCUMENT_SUFFIXES, self._ingest_document)
+        self.processors.register("image", _IMAGE_SUFFIXES, self._ingest_image)
+
+    def register_processor(self, name: str, suffixes: set[str], handler) -> None:
+        self.processors.register(name, suffixes, handler)
 
     def ingest(self, path: str | Path) -> IngestionResult:
         file_path = Path(path)
-        suffix = file_path.suffix.lower()
         source_id = hashlib.sha1(file_path.read_bytes()).hexdigest()[:20]
         media_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-
-        if suffix in _TEXT_SUFFIXES:
-            text = normalize_text(file_path.read_text(encoding="utf-8", errors="replace"))
-            return IngestionResult(
-                source_id,
-                file_path.name,
-                media_type,
-                "text-direct",
-                [SourceElement("text-0", "paragraph", text, raw_text=text)],
+        processor = self.processors.resolve(file_path)
+        if processor is None:
+            raise ValueError(
+                f"Unsupported input type: {file_path.suffix.lower() or media_type}. "
+                f"Supported suffixes: {', '.join(self.processors.supported_suffixes())}"
             )
-        if suffix in _DOCUMENT_SUFFIXES:
-            return self._ingest_document(file_path, source_id, media_type)
-        if suffix in _IMAGE_SUFFIXES:
-            return self._ingest_image(file_path, source_id, media_type)
-        raise ValueError(f"Unsupported input type: {suffix or media_type}")
+        return processor.handler(file_path, source_id, media_type)
+
+    def _ingest_text(self, file_path: Path, source_id: str, media_type: str) -> IngestionResult:
+        text = normalize_text(file_path.read_text(encoding="utf-8", errors="replace"))
+        return IngestionResult(
+            source_id, file_path.name, media_type, "text-direct",
+            [SourceElement("text-0", "paragraph", text, raw_text=text)],
+        )
 
     def _ingest_document(self, path: Path, source_id: str, media_type: str) -> IngestionResult:
         warnings: list[str] = []

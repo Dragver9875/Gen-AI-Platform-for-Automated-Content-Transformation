@@ -81,6 +81,13 @@ class Settings:
     chunk_target_chars: int
     chunk_overlap_chars: int
 
+    # Retrieval strategy
+    retrieval_strategy: str
+    retrieval_bm25_k: int
+    retrieval_vector_k: int
+    retrieval_rrf_k: int
+    retrieval_use_reranker: bool
+
     # Phase 3 orchestration
     phase3_default_top_k: int
     phase3_context_max_chars: int
@@ -110,6 +117,23 @@ class Settings:
     phase5_min_faithfulness_score: float
     phase5_max_claims_per_call: int
     phase5_evidence_chars_per_claim: int
+    phase5_default_verification_profile: str
+    phase5_verification_profiles_json: str | None
+
+    # Phase 6 artifact generation
+    phase6_output_dir: str
+    phase6_artifact_specs_path: str
+    phase6_typst_binary: str
+    phase6_retain_typst_source: bool
+    phase6_fail_fast: bool
+    phase6_temperature: float
+    phase6_max_tokens: int
+
+    # Hosted image generation (e.g. FLUX endpoint)
+    image_gen_api_url: str | None
+    image_gen_api_key: str | None
+    image_gen_api_style: str
+    image_gen_model: str | None
 
     # HTTP
     http_timeout_s: float
@@ -150,6 +174,11 @@ class Settings:
             pdf_visual_prompt=_env("PDF_VISUAL_PROMPT", "Describe this PDF page faithfully for retrieval. Preserve all visible text, labels, numbers, chart trends, diagram relationships, and important visual content. If it is primarily a scanned text page, transcribe the meaningful content.") or "",
             chunk_target_chars=_env_int("CHUNK_TARGET_CHARS", 3200),
             chunk_overlap_chars=_env_int("CHUNK_OVERLAP_CHARS", 450),
+            retrieval_strategy=(_env("RETRIEVAL_STRATEGY", "hybrid") or "hybrid").lower(),
+            retrieval_bm25_k=_env_int("RETRIEVAL_BM25_K", 15),
+            retrieval_vector_k=_env_int("RETRIEVAL_VECTOR_K", 15),
+            retrieval_rrf_k=_env_int("RETRIEVAL_RRF_K", 60),
+            retrieval_use_reranker=_env_bool("RETRIEVAL_USE_RERANKER", True),
             phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),
             phase3_context_max_chars=_env_int("PHASE3_CONTEXT_MAX_CHARS", 60000),
             llm_api_url=_env("LLM_API_URL"),
@@ -174,6 +203,19 @@ class Settings:
             phase5_min_faithfulness_score=_env_float("PHASE5_MIN_FAITHFULNESS_SCORE", 1.0),
             phase5_max_claims_per_call=_env_int("PHASE5_MAX_CLAIMS_PER_CALL", 12),
             phase5_evidence_chars_per_claim=_env_int("PHASE5_EVIDENCE_CHARS_PER_CLAIM", 8000),
+            phase5_default_verification_profile=(_env("PHASE5_DEFAULT_VERIFICATION_PROFILE", "strict") or "strict").lower(),
+            phase5_verification_profiles_json=_env("PHASE5_VERIFICATION_PROFILES_JSON"),
+            phase6_output_dir=_env("PHASE6_OUTPUT_DIR", "artifacts") or "artifacts",
+            phase6_artifact_specs_path=_env("PHASE6_ARTIFACT_SPECS_PATH", "artifacts/specs/default.json") or "artifacts/specs/default.json",
+            phase6_typst_binary=_env("PHASE6_TYPST_BINARY", "typst") or "typst",
+            phase6_retain_typst_source=_env_bool("PHASE6_RETAIN_TYPST_SOURCE", True),
+            phase6_fail_fast=_env_bool("PHASE6_FAIL_FAST", False),
+            phase6_temperature=_env_float("PHASE6_TEMPERATURE", 0.1),
+            phase6_max_tokens=_env_int("PHASE6_MAX_TOKENS", 4096),
+            image_gen_api_url=_env("IMAGE_GEN_API_URL"),
+            image_gen_api_key=_env("IMAGE_GEN_API_KEY"),
+            image_gen_api_style=(_env("IMAGE_GEN_API_STYLE", "hf") or "hf").lower(),
+            image_gen_model=_env("IMAGE_GEN_MODEL"),
             http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),
             http_retries=_env_int("HTTP_RETRIES", 2),
         )

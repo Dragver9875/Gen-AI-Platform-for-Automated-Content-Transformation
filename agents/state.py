@@ -30,6 +30,7 @@ class AgentState(TypedDict, total=False):
     intent_confidence: float
     intent_reason: str
     retrieval_mode: str
+    retrieval_config: dict[str, Any]
 
     retrieved_documents: list[dict[str, Any]]
     context_groups: list[dict[str, Any]]
@@ -47,6 +48,10 @@ class AgentState(TypedDict, total=False):
     verification_requires_repair: bool
     repair_attempts: int
     max_repair_attempts: int
+
+    # Phase 6 artifact generation
+    artifacts: list[dict[str, Any]]
+    artifact_metadata: dict[str, Any]
 
     status: str
     warnings: list[str]

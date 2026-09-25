@@ -24,6 +24,8 @@ class TransformationConfig(BaseModel):
     style: str = "clear"
     output_formats: list[str] = Field(default_factory=lambda: ["text"])
     custom_instructions: str = ""
+    verification_profile: str = "strict"
+    artifact_options: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @field_validator(
         "artifact_type", "tone", "audience", "language", "detail_level", "objective", "style",

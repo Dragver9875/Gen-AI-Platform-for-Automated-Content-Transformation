@@ -11,6 +11,7 @@ from verification.models import (
     VerificationReport,
 )
 from verification.prompts import repair_system_prompt, repair_user_prompt, verifier_system_prompt, verifier_user_prompt
+from verification.profiles import VerificationProfile, VerificationProfileRegistry
 
 
 class StructuredGenerator(Protocol):
@@ -60,6 +61,7 @@ class VerificationService:
         min_faithfulness_score: float = 1.0,
         max_claims_per_call: int = 12,
         evidence_chars_per_claim: int = 8000,
+        profile_registry: VerificationProfileRegistry | None = None,
     ):
         self.verifier = verifier
         self.repair_generator = repair_generator or verifier
@@ -72,6 +74,16 @@ class VerificationService:
         self.max_claims_per_call = max(1, int(max_claims_per_call))
         self.evidence_chars_per_claim = max(500, int(evidence_chars_per_claim))
         self.literal_validator = DeterministicLiteralValidator()
+        self.profile_registry = profile_registry or VerificationProfileRegistry(
+            [VerificationProfile(
+                name="strict",
+                min_faithfulness_score=self.min_faithfulness_score,
+                allow_partial=False,
+                require_evidence=True,
+                deterministic_conflicts_fail=True,
+            )],
+            default_profile="strict",
+        )
 
     @staticmethod
     def _config(state: dict[str, Any]) -> TransformationConfig:
@@ -120,6 +132,8 @@ class VerificationService:
 
     def verify(self, state: dict[str, Any]) -> tuple[VerificationReport, list[str], dict[str, Any]]:
         crr = self._crr(state)
+        config = self._config(state)
+        profile = self.profile_registry.resolve(config.verification_profile)
         documents = self._document_map(state)
         warnings: list[str] = []
         semantic: dict[str, SemanticClaimAssessment] = {}
@@ -186,7 +200,7 @@ class VerificationService:
             issues = self.literal_validator.validate(claim.text, combined)
             final_status = assessment.status
             conflicts = [issue for issue in issues if issue.severity == "conflict"]
-            if conflicts:
+            if conflicts and profile.deterministic_conflicts_fail:
                 final_status = "unsupported"
             results.append(ClaimVerification(
                 claim_id=claim.claim_id,
@@ -209,9 +223,15 @@ class VerificationService:
             "unsupported": sum(r.status == "unsupported" for r in results),
             "insufficient_evidence": sum(r.status == "insufficient_evidence" for r in results),
         }
-        # A claim-bearing artifact passes only when every claim is supported and the
-        # score threshold is met. Claim-free artifacts pass by construction.
-        passed = score >= self.min_faithfulness_score and counts["partially_supported"] == 0 and counts["unsupported"] == 0 and counts["insufficient_evidence"] == 0
+        threshold = profile.min_faithfulness_score
+        evidence_failure = counts["insufficient_evidence"] > 0 if profile.require_evidence else False
+        partial_failure = counts["partially_supported"] > 0 if not profile.allow_partial else False
+        passed = (
+            score >= threshold
+            and counts["unsupported"] == 0
+            and not evidence_failure
+            and not partial_failure
+        )
         attempts = int(state.get("repair_attempts") or 0)
         report = VerificationReport(
             passed=passed,
@@ -225,7 +245,12 @@ class VerificationService:
             repair_attempts=attempts,
             max_repair_attempts=self.max_repair_attempts,
         )
-        return report, warnings, {"verification_llm_calls": calls, "claims_verified": total}
+        return report, warnings, {
+            "verification_llm_calls": calls,
+            "claims_verified": total,
+            "verification_profile": profile.name,
+            "verification_threshold": threshold,
+        }
 
     def repair(self, state: dict[str, Any], report: VerificationReport) -> tuple[CanonicalResponse, list[str], dict[str, Any]]:
         crr = self._crr(state)
