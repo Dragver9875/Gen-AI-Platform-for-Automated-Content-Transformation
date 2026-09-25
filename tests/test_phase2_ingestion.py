@@ -108,3 +108,23 @@ def test_pdf_preflight_detects_full_page_image(tmp_path: Path):
     profile = PdfPreflight(native_text_chars=80, image_coverage_threshold=0.7).inspect(pdf_path)
     assert profile.strategy == "image-only/scanned"
     assert profile.pages[0].kind == "scanned"
+
+
+def test_image_falls_back_to_vlm_routing_when_siglip_unavailable(tmp_path: Path):
+    class BrokenSiglip:
+        def classify(self, path):
+            raise RuntimeError("provider unavailable")
+
+    class RoutingVLM(FakeVLM):
+        def classify_file(self, path, labels):
+            return [{"label": "photograph", "score": 1.0}]
+
+    image = tmp_path / "photo.png"
+    image.write_bytes(b"fake-image")
+    router = IngestionRouter(
+        docling=FakeDocling(), siglip=BrokenSiglip(), vlm=RoutingVLM(), pdf_preflight=FakePdfPreflight()
+    )
+    result = router.ingest(image)
+    assert result.strategy.startswith("image-vlm")
+    assert result.provider_metadata["routing_source"] == "vlm_fallback"
+    assert any("SigLIP routing unavailable" in warning for warning in result.warnings)

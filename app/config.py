@@ -104,13 +104,16 @@ class Settings:
     docling_timeout_s: float
     docling_render_dpi: int
 
-    # Hosted SigLIP router endpoint
-    siglip_api_url: str
+    # SigLIP routing. By default uses Hugging Face InferenceClient + HF_TOKEN.
+    siglip_api_url: str | None
     siglip_api_key: str
+    siglip_model: str
 
-    # Hosted VLM endpoint
+    # Hosted VLM. Defaults to Hugging Face OpenAI-compatible multimodal router.
     vlm_api_url: str
     vlm_api_key: str
+    vlm_model: str
+    vlm_api_style: str
 
     # User sessions
     session_store_backend: str
@@ -210,26 +213,48 @@ class Settings:
             "DOCLING_API_KEY", api_url=docling_api_url, hf_token=hf_token, required=True
         )
 
-        siglip_api_url = _env("SIGLIP_API_URL", required=True)
-        siglip_api_key = _provider_key(
-            "SIGLIP_API_KEY",
-            api_url=siglip_api_url,
-            hf_token=hf_token,
-            required=True,
-        )
+        siglip_model = _env("SIGLIP_MODEL", "google/siglip-so400m-patch14-384") or "google/siglip-so400m-patch14-384"
+        siglip_api_url = _env("SIGLIP_API_URL")
+        if siglip_api_url:
+            siglip_api_key = _provider_key(
+                "SIGLIP_API_KEY",
+                api_url=siglip_api_url,
+                hf_token=hf_token,
+                required=True,
+            )
+        else:
+            # The default SigLIP path uses huggingface_hub.InferenceClient directly.
+            # No endpoint URL is required; the Hub selects an available inference provider.
+            siglip_api_key = _env("SIGLIP_API_KEY") or hf_token
+            if not siglip_api_key:
+                raise ConfigurationError("HF_TOKEN is required for default SigLIP inference")
 
-        vlm_api_url = _env("VLM_API_URL", required=True)
+        vlm_model = _env("VLM_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct") or "Qwen/Qwen2.5-VL-3B-Instruct"
+        vlm_api_url = _env("VLM_API_URL") or "https://router.huggingface.co/v1/chat/completions"
         vlm_api_key = _provider_key(
             "VLM_API_KEY",
             api_url=vlm_api_url,
             hf_token=hf_token,
             required=True,
         )
+        vlm_api_style = (_env("VLM_API_STYLE", "openai") or "openai").lower()
 
         llm_api_url = _env("LLM_API_URL")
         if not llm_api_url and hf_token:
             # Hugging Face Inference Providers expose an OpenAI-compatible chat route.
             llm_api_url = "https://router.huggingface.co/v1/chat/completions"
+
+        # Compatibility migration: an earlier repository revision defaulted to a
+        # Qwen3 checkpoint that is not currently router-served by HF Inference
+        # Providers. Preserve explicit custom endpoints, but transparently migrate
+        # that legacy model when using the shared HF router.
+        llm_model = _env("LLM_MODEL", "openai/gpt-oss-20b:fastest") or "openai/gpt-oss-20b:fastest"
+        if (
+            llm_model == "Qwen/Qwen3-30B-A3B-Instruct-2507"
+            and _is_huggingface_url(llm_api_url)
+        ):
+            llm_model = "openai/gpt-oss-20b:fastest"
+
         llm_api_key = _provider_key(
             "LLM_API_KEY",
             api_url=llm_api_url,
@@ -287,10 +312,13 @@ class Settings:
             docling_model=docling_model,
             docling_timeout_s=_env_float("DOCLING_TIMEOUT_S", 180.0),
             docling_render_dpi=_env_int("DOCLING_RENDER_DPI", 144),
-            siglip_api_url=siglip_api_url or "",
+            siglip_api_url=siglip_api_url,
             siglip_api_key=siglip_api_key or "",
-            vlm_api_url=vlm_api_url or "",
+            siglip_model=siglip_model,
+            vlm_api_url=vlm_api_url,
             vlm_api_key=vlm_api_key or "",
+            vlm_model=vlm_model,
+            vlm_api_style=vlm_api_style,
             session_store_backend=(_env("SESSION_STORE_BACKEND", "memory") or "memory").lower(),
             session_database_url=_env("SESSION_DATABASE_URL"),
             session_table=_env("SESSION_TABLE", "user_sessions") or "user_sessions",
@@ -312,8 +340,8 @@ class Settings:
             llm_api_url=llm_api_url,
             llm_api_key=llm_api_key,
             llm_api_style=(_env("LLM_API_STYLE", "openai") or "openai").lower(),
-            llm_model=_env("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-            llm_response_mode=(_env("LLM_RESPONSE_MODE", "json_object") or "json_object").lower(),
+            llm_model=llm_model,
+            llm_response_mode=(_env("LLM_RESPONSE_MODE", "json_schema") or "json_schema").lower(),
             phase4_temperature=_env_float("PHASE4_TEMPERATURE", 0.1),
             phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),
             phase4_group_context_max_chars=_env_int("PHASE4_GROUP_CONTEXT_MAX_CHARS", 18000),

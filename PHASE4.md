@@ -47,4 +47,4 @@ Phase 4 does **not** decide whether a cited chunk truly entails a claim. Phase 5
 
 ## Default open-source LLM
 
-The default Phase 4 model is `Qwen/Qwen3-30B-A3B-Instruct-2507` (Apache-2.0), accessed only through the configured hosted API. The model name and endpoint remain environment-configurable.
+The default Phase 4 model is `openai/gpt-oss-20b:fastest` (Apache-2.0), accessed through Hugging Face Inference Providers by default. The model name and endpoint remain environment-configurable.

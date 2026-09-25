@@ -441,27 +441,43 @@ If `DOCLING_API_URL` is blank, the application uses the Hugging Face OpenAI-comp
 
 ## SigLIP
 
-Expected custom endpoint payload:
+SigLIP no longer requires a dedicated endpoint URL. By default the service uses
+`huggingface_hub.InferenceClient.zero_shot_image_classification()` with:
 
-```json
-{
-  "image_base64": "...",
-  "candidate_labels": ["document page", "screenshot", "chart", "diagram", "map", "photograph", "other visual"]
-}
+```text
+model: google/siglip-so400m-patch14-384
+auth: HF_TOKEN
 ```
+
+Optional override:
+
+```env
+SIGLIP_MODEL=google/siglip-so400m-patch14-384
+SIGLIP_API_URL=
+```
+
+If `SIGLIP_API_URL` is supplied, the original custom endpoint contract is still
+supported. If serverless SigLIP inference is unavailable, Phase 2 automatically
+falls back to VLM-based visual routing instead of aborting ingestion.
 
 ## VLM
 
-```json
-{
-  "image_base64": "...",
-  "prompt": "..."
-}
+The default VLM uses Hugging Face's OpenAI-compatible multimodal router, so no
+endpoint URL needs to be configured manually:
+
+```env
+VLM_MODEL=Qwen/Qwen2.5-VL-3B-Instruct
+VLM_API_URL=
+VLM_API_STYLE=openai
 ```
+
+An explicit `VLM_API_URL` remains available as an override for a dedicated HF
+Inference Endpoint or other compatible deployment. Hugging Face authentication
+still comes from `HF_TOKEN` for HF-owned URLs.
 
 ## Hosted open-source LLM
 
-Default model: `Qwen/Qwen3-30B-A3B-Instruct-2507` (Apache-2.0). It is consumed only through a hosted API endpoint; no Qwen weights are bundled with or loaded by this repository. `LLM_MODEL` remains configurable.
+Default model: `openai/gpt-oss-20b:fastest` (Apache-2.0). It is consumed only through a hosted API endpoint; no model weights are bundled with or loaded by this repository. `LLM_MODEL` remains configurable.
 
 Supported modes:
 
@@ -483,7 +499,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure `HF_TOKEN`, Chroma Cloud, the session database, and the Hugging Face endpoint URLs used for SigLIP/VLM/reranking as needed. See `.env.example`.
+Configure `HF_TOKEN`, Chroma Cloud, and (for persistent sessions) the session database. SigLIP, the VLM, Harrier, Granite Docling, Qwen, and verification all have Hugging Face defaults; dedicated endpoint URLs are optional overrides. See `.env.example`.
 
 The application never requires local Harrier, Qwen, SigLIP, VLM or image-generation weights.
 
@@ -551,3 +567,41 @@ Current regression suite: **40 tests**.
 - operational logging/monitoring using the telemetry events introduced in Phase 9
 
 The Phase 9 baseline should be re-run after Phase 7/8 so deployment overhead and provider behavior can be compared against the pre-deployment baseline.
+
+## Windows PowerShell launcher notes
+
+If Windows marks the downloaded scripts as coming from the Internet, unblock them once after you trust the repository:
+
+```powershell
+Unblock-File .\setup.ps1
+Unblock-File .\run_ps.ps1
+```
+
+`run_ps.ps1` transports queries to Python as UTF-8 Base64, so spaces, embedded quotes, Unicode text, and newlines are preserved correctly even in Windows PowerShell 5.1.
+
+Prompt-only transformations are supported. When no file and no existing `-SessionId` are supplied, the entered query is temporarily materialized as a text source and passed through the normal ingestion pipeline. For clearer separation between source content and instruction, use `-SourceText` explicitly:
+
+```powershell
+.\run_ps.ps1 `
+  -SourceText 'I finished a project today' `
+  -Query 'Rewrite this as a formal LinkedIn post' `
+  -Mode transform `
+  -Format text
+```
+
+
+### Hugging Face chat router 400 errors
+
+The original prototype briefly defaulted to `Qwen/Qwen3-30B-A3B-Instruct-2507`. That checkpoint is not currently router-served by Hugging Face Inference Providers, so old `.env` files can produce an HTTP 400 during Phase 4. The current default is `openai/gpt-oss-20b:fastest`, which Hugging Face documents as supported by Inference Providers.
+
+Recommended configuration:
+
+```env
+LLM_API_URL=
+LLM_API_KEY=
+LLM_API_STYLE=openai
+LLM_MODEL=openai/gpt-oss-20b:fastest
+LLM_RESPONSE_MODE=json_schema
+```
+
+When the endpoint does not support the requested structured-output mode, the adapter automatically degrades from JSON Schema to JSON object and finally to prompt-constrained JSON, with Pydantic validation still enforced afterwards.

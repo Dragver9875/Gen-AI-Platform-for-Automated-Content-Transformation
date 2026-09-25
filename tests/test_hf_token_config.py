@@ -13,8 +13,6 @@ BASE_ENV = {
     "CHROMA_API_KEY": "chroma",
     "CHROMA_TENANT": "tenant",
     "CHROMA_DATABASE": "db",
-    "SIGLIP_API_URL": "https://siglip.endpoints.huggingface.cloud",
-    "VLM_API_URL": "https://vlm.endpoints.huggingface.cloud",
     "SESSION_STORE_BACKEND": "memory",
 }
 
@@ -54,9 +52,14 @@ def test_single_hf_token_configures_hf_model_layer(monkeypatch):
     assert settings.verifier_api_url is None
     assert settings.verifier_api_key is None
 
-    # HF-hosted custom endpoints safely reuse the same token.
+    # Visual providers have real Hugging Face defaults; no endpoint URLs are required.
     assert settings.siglip_api_key == "hf_test_token"
+    assert settings.siglip_api_url is None
+    assert settings.siglip_model == "google/siglip-so400m-patch14-384"
     assert settings.vlm_api_key == "hf_test_token"
+    assert settings.vlm_api_url == "https://router.huggingface.co/v1/chat/completions"
+    assert settings.vlm_model == "Qwen/Qwen2.5-VL-3B-Instruct"
+    assert settings.vlm_api_style == "openai"
 
 
 def test_hf_reranker_endpoint_reuses_hf_token(monkeypatch):

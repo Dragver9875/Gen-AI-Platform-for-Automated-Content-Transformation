@@ -116,6 +116,14 @@ if ($missing.Count -gt 0) {
 $env:PYTHONUTF8 = "1"
 $env:PYTHONUNBUFFERED = "1"
 
+# Compatibility migration for repositories configured before the HF router
+# availability fix. The old Qwen3 checkpoint is not currently router-served.
+$configuredLlmModel = Get-DotEnvValue -Name "LLM_MODEL"
+if ($configuredLlmModel -eq "Qwen/Qwen3-30B-A3B-Instruct-2507") {
+    Write-Warn "Legacy LLM_MODEL is not currently served by the HF router; using openai/gpt-oss-20b:fastest for this run."
+    $env:LLM_MODEL = "openai/gpt-oss-20b:fastest"
+}
+
 if ($RunTests) {
     Write-Step "Running tests"
     & $Python -m pytest -q

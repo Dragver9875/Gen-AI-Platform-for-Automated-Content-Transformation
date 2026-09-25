@@ -18,6 +18,7 @@ from ingestion.registry import IngestionProcessorRegistry
 _TEXT_SUFFIXES = {".txt", ".md"}
 _DOCUMENT_SUFFIXES = {".pdf", ".ppt", ".pptx"}
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+DEFAULT_VISUAL_LABELS = ("document page", "screenshot", "chart", "diagram", "map", "photograph", "other visual")
 class IngestionRouter:
     def __init__(
         self,
@@ -144,7 +145,17 @@ class IngestionRouter:
         )
 
     def _ingest_image(self, path: Path, source_id: str, media_type: str) -> IngestionResult:
-        predictions = self.siglip.classify(path)
+        warnings: list[str] = []
+        routing_source = "siglip"
+        try:
+            predictions = self.siglip.classify(path)
+        except Exception as exc:
+            # HF serverless availability varies by model/provider. Visual routing must
+            # not make ingestion unavailable, so fall back to the already configured VLM.
+            warnings.append(f"SigLIP routing unavailable; used VLM fallback: {exc}")
+            predictions = self.vlm.classify_file(path, list(DEFAULT_VISUAL_LABELS))
+            routing_source = "vlm_fallback"
+
         top_label = str(predictions[0]["label"]).lower() if predictions else "other visual"
         if top_label in self.document_like_image_labels:
             converted = self.docling.convert_file(path, do_ocr=True, force_ocr=True, enrich_pictures=True)
@@ -156,7 +167,8 @@ class IngestionRouter:
                 media_type,
                 f"image-docling:{top_label}",
                 elements,
-                provider_metadata={"siglip": predictions},
+                warnings=warnings,
+                provider_metadata={"visual_routing": predictions, "routing_source": routing_source},
             )
 
         description = self.vlm.describe_file(path)
@@ -165,6 +177,7 @@ class IngestionRouter:
             path.name,
             media_type,
             f"image-vlm:{top_label}",
-            [SourceElement("visual-0", "visual_description", normalize_text(description), metadata={"siglip_label": top_label})],
-            provider_metadata={"siglip": predictions},
+            [SourceElement("visual-0", "visual_description", normalize_text(description), metadata={"visual_route_label": top_label})],
+            warnings=warnings,
+            provider_metadata={"visual_routing": predictions, "routing_source": routing_source},
         )

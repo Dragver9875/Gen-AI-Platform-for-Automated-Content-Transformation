@@ -54,8 +54,9 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
     registry.register(
         ProviderCapability.VISUAL_ROUTING,
         SigLIPRoutingProvider(
-            settings.siglip_api_url,
             settings.siglip_api_key,
+            model=settings.siglip_model,
+            api_url=settings.siglip_api_url,
             timeout_s=settings.http_timeout_s,
             retries=settings.http_retries,
         ),
@@ -66,6 +67,8 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
         VLMProvider(
             settings.vlm_api_url,
             settings.vlm_api_key,
+            model=settings.vlm_model,
+            api_style=settings.vlm_api_style,
             timeout_s=settings.http_timeout_s,
             retries=settings.http_retries,
         ),

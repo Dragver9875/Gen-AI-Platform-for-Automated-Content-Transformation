@@ -194,3 +194,6 @@ docker-compose.override.yml
 
 # Phase 9 evaluation outputs
 eval_reports/
+
+# Temporary inline prompt sources created by run_ps.ps1
+.runtime_inputs/
