@@ -44,8 +44,10 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
         DoclingAPIProvider(
             settings.docling_api_url,
             settings.docling_api_key,
+            model=settings.docling_model,
             timeout_s=settings.docling_timeout_s,
             retries=settings.http_retries,
+            render_dpi=settings.docling_render_dpi,
         ),
         name="docling",
     )
@@ -90,7 +92,8 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
             ProviderCapability.RERANKING,
             HostedReranker(
                 settings.reranker_api_url,
-                settings.reranker_api_key,
+                settings.reranker_api_key or settings.hf_token or "",
+                api_style=settings.reranker_api_style,
                 timeout_s=settings.http_timeout_s,
                 retries=settings.http_retries,
             ),
@@ -115,7 +118,7 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
                 ProviderCapability.VERIFICATION,
                 HostedLLMProvider(
                     settings.verifier_api_url,
-                    settings.verifier_api_key or settings.llm_api_key,
+                    settings.verifier_api_key or settings.hf_token or settings.llm_api_key or "",
                     api_style=settings.verifier_api_style,
                     model=settings.verifier_model,
                     response_mode=settings.verifier_response_mode,

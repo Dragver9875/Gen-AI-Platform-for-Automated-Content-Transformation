@@ -13,7 +13,6 @@ BASE_ENV = {
     "CHROMA_API_KEY": "chroma",
     "CHROMA_TENANT": "tenant",
     "CHROMA_DATABASE": "db",
-    "DOCLING_API_URL": "https://docling.example",
     "SIGLIP_API_URL": "https://siglip.endpoints.huggingface.cloud",
     "VLM_API_URL": "https://vlm.endpoints.huggingface.cloud",
     "SESSION_STORE_BACKEND": "memory",
@@ -21,14 +20,18 @@ BASE_ENV = {
 
 
 def _set_env(monkeypatch, values=None):
+    prefixes = (
+        "HF_", "HARRIER_", "LLM_", "SIGLIP_", "VLM_", "CHROMA_", "DOCLING_",
+        "RERANKER_", "VERIFIER_", "SESSION_", "IMAGE_GEN_",
+    )
     for key in list(os.environ):
-        if key.startswith(("HF_", "HARRIER_", "LLM_", "SIGLIP_", "VLM_", "CHROMA_", "DOCLING_", "SESSION_")):
+        if key.startswith(prefixes):
             monkeypatch.delenv(key, raising=False)
     for key, value in (values or BASE_ENV).items():
         monkeypatch.setenv(key, value)
 
 
-def test_single_hf_token_configures_harrier_and_default_qwen_router(monkeypatch):
+def test_single_hf_token_configures_hf_model_layer(monkeypatch):
     _set_env(monkeypatch)
     settings = Settings.from_env()
 
@@ -40,15 +43,34 @@ def test_single_hf_token_configures_harrier_and_default_qwen_router(monkeypatch)
     assert settings.harrier_prompt_name == "web_search_query"
     assert settings.harrier_normalize is True
 
+    assert settings.docling_api_key == "hf_test_token"
+    assert settings.docling_api_url == "https://router.huggingface.co/v1/chat/completions"
+    assert settings.docling_model == "ibm-granite/granite-docling-258M"
+
     assert settings.llm_api_key == "hf_test_token"
     assert settings.llm_api_url == "https://router.huggingface.co/v1/chat/completions"
+
+    # Verification reuses the primary HF-hosted Qwen provider by default.
+    assert settings.verifier_api_url is None
+    assert settings.verifier_api_key is None
 
     # HF-hosted custom endpoints safely reuse the same token.
     assert settings.siglip_api_key == "hf_test_token"
     assert settings.vlm_api_key == "hf_test_token"
 
 
-def test_provider_specific_key_overrides_hf_token(monkeypatch):
+def test_hf_reranker_endpoint_reuses_hf_token(monkeypatch):
+    values = dict(BASE_ENV)
+    values["RERANKER_API_URL"] = "https://reranker.endpoints.huggingface.cloud"
+    _set_env(monkeypatch, values)
+    settings = Settings.from_env()
+
+    assert settings.reranker_api_key == "hf_test_token"
+    assert settings.reranker_api_style == "hf_tei"
+    assert settings.reranker_model == "BAAI/bge-reranker-v2-m3"
+
+
+def test_provider_specific_key_still_overrides_hf_token_for_custom_deployments(monkeypatch):
     values = dict(BASE_ENV)
     values["HARRIER_API_KEY"] = "dedicated_harrier_key"
     _set_env(monkeypatch, values)
@@ -63,6 +85,15 @@ def test_hf_token_is_not_forwarded_to_non_hf_custom_endpoint(monkeypatch):
     _set_env(monkeypatch, values)
 
     with pytest.raises(ConfigurationError, match="VLM_API_KEY"):
+        Settings.from_env()
+
+
+def test_docling_non_hf_override_requires_its_own_explicit_key(monkeypatch):
+    values = dict(BASE_ENV)
+    values["DOCLING_API_URL"] = "https://docling.example.com/v1/chat/completions"
+    _set_env(monkeypatch, values)
+
+    with pytest.raises(ConfigurationError, match="DOCLING_API_KEY"):
         Settings.from_env()
 
 

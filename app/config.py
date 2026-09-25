@@ -94,11 +94,15 @@ class Settings:
     # Optional hosted reranker endpoint. RRF is used when omitted.
     reranker_api_url: str | None
     reranker_api_key: str | None
+    reranker_api_style: str
+    reranker_model: str
 
-    # Docling managed/remote service
+    # Granite Docling via Hugging Face image-text-to-text inference
     docling_api_url: str
-    docling_api_key: str | None
+    docling_api_key: str
+    docling_model: str
     docling_timeout_s: float
+    docling_render_dpi: int
 
     # Hosted SigLIP router endpoint
     siglip_api_url: str
@@ -198,6 +202,14 @@ class Settings:
             required=True,
         )
 
+        # All ML services reuse HF_TOKEN when they are on Hugging Face infrastructure.
+        # Chroma and the session database remain the only independent credentials.
+        docling_model = _env("DOCLING_MODEL", "ibm-granite/granite-docling-258M") or "ibm-granite/granite-docling-258M"
+        docling_api_url = _env("DOCLING_API_URL") or "https://router.huggingface.co/v1/chat/completions"
+        docling_api_key = _provider_key(
+            "DOCLING_API_KEY", api_url=docling_api_url, hf_token=hf_token, required=True
+        )
+
         siglip_api_url = _env("SIGLIP_API_URL", required=True)
         siglip_api_key = _provider_key(
             "SIGLIP_API_KEY",
@@ -221,6 +233,22 @@ class Settings:
         llm_api_key = _provider_key(
             "LLM_API_KEY",
             api_url=llm_api_url,
+            hf_token=hf_token,
+            required=False,
+        )
+
+        reranker_api_url = _env("RERANKER_API_URL")
+        reranker_api_key = _provider_key(
+            "RERANKER_API_KEY",
+            api_url=reranker_api_url,
+            hf_token=hf_token,
+            required=False,
+        )
+
+        verifier_api_url = _env("VERIFIER_API_URL")
+        verifier_api_key = _provider_key(
+            "VERIFIER_API_KEY",
+            api_url=verifier_api_url,
             hf_token=hf_token,
             required=False,
         )
@@ -250,11 +278,15 @@ class Settings:
                 "Given a web search query, retrieve relevant passages that answer the query",
             ) or "Given a web search query, retrieve relevant passages that answer the query",
             harrier_batch_size=_env_int("HARRIER_BATCH_SIZE", 64),
-            reranker_api_url=_env("RERANKER_API_URL"),
-            reranker_api_key=_env("RERANKER_API_KEY"),
-            docling_api_url=_env("DOCLING_API_URL", required=True),  # type: ignore[arg-type]
-            docling_api_key=_env("DOCLING_API_KEY"),
+            reranker_api_url=reranker_api_url,
+            reranker_api_key=reranker_api_key,
+            reranker_api_style=(_env("RERANKER_API_STYLE", "hf_tei") or "hf_tei").lower(),
+            reranker_model=_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3") or "BAAI/bge-reranker-v2-m3",
+            docling_api_url=docling_api_url,
+            docling_api_key=docling_api_key or "",
+            docling_model=docling_model,
             docling_timeout_s=_env_float("DOCLING_TIMEOUT_S", 180.0),
+            docling_render_dpi=_env_int("DOCLING_RENDER_DPI", 144),
             siglip_api_url=siglip_api_url or "",
             siglip_api_key=siglip_api_key or "",
             vlm_api_url=vlm_api_url or "",
@@ -286,8 +318,8 @@ class Settings:
             phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),
             phase4_group_context_max_chars=_env_int("PHASE4_GROUP_CONTEXT_MAX_CHARS", 18000),
             phase4_digest_max_tokens=_env_int("PHASE4_DIGEST_MAX_TOKENS", 2048),
-            verifier_api_url=_env("VERIFIER_API_URL"),
-            verifier_api_key=_env("VERIFIER_API_KEY"),
+            verifier_api_url=verifier_api_url,
+            verifier_api_key=verifier_api_key,
             verifier_api_style=(_env("VERIFIER_API_STYLE", "openai") or "openai").lower(),
             verifier_model=_env("VERIFIER_MODEL"),
             verifier_response_mode=(_env("VERIFIER_RESPONSE_MODE", "json_object") or "json_object").lower(),

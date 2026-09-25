@@ -42,7 +42,7 @@ TEXT / PDF / PPT / PPTX / IMAGE
      v
 Adaptive ingestion router
      |
-     +--> Docling API -------- document/OCR/layout
+     +--> Granite Docling HF -- document/OCR/layout
      +--> SigLIP API -------- visual routing
      +--> VLM API ----------- visual understanding
      |
@@ -116,7 +116,7 @@ Implemented:
 - BM25 sparse retrieval
 - Harrier/Chroma dense retrieval
 - Reciprocal Rank Fusion (RRF)
-- optional hosted reranker
+- optional Hugging Face TEI multilingual reranker
 - configurable `hybrid`, `dense`, or `lexical` retrieval
 
 # Phase 2 — Adaptive multimodal ingestion
@@ -125,12 +125,12 @@ Supported inputs:
 
 - `.txt`, `.md`
 - `.pdf`
-- `.ppt`, `.pptx`
+- `.pptx` (legacy `.ppt` must be converted to `.pptx` before upload)
 - `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff`
 
 PDF pages are preflight-classified as native-text, scanned/image-only, mixed, or visual-heavy. Image-only PDFs therefore follow OCR/visual-understanding routes instead of failing as text PDFs.
 
-Standalone images are routed through SigLIP; document-like images go to Docling and general visuals go to the VLM endpoint.
+Standalone images are routed through SigLIP; document-like images go to the Hugging Face Granite Docling adapter and general visuals go to the VLM endpoint. PDF pages are rendered locally and sent as images to `ibm-granite/granite-docling-258M` through a Hugging Face-compatible multimodal endpoint. PPTX text/tables are extracted deterministically with `python-pptx`; legacy `.ppt` should be converted to `.pptx` before upload.
 
 # Phase 3 — LangGraph orchestration and user sessions
 
@@ -360,22 +360,26 @@ See [`PHASE9.md`](PHASE9.md) for the focused Phase 9 description.
 
 ## Hugging Face token setup
 
-A single Hugging Face token can now be reused by Hugging Face-hosted providers. The application only forwards `HF_TOKEN` to URLs owned by Hugging Face (`*.huggingface.co` or `*.huggingface.cloud`), so an accidentally configured third-party URL does not receive the shared token.
+The ML layer now uses one shared Hugging Face credential. `HF_TOKEN` is only forwarded to Hugging Face-owned URLs (`*.huggingface.co` and `*.huggingface.cloud`).
 
 ```env
 HF_TOKEN=hf_your_token_here
 ```
 
-With only this token set, the defaults are:
+The same token can authenticate Harrier, Granite Docling, Qwen generation/verification, Hugging Face SigLIP/VLM endpoints, the optional HF reranker endpoint, and FLUX/image-generation providers.
 
-```text
-Harrier -> HF serverless feature-extraction endpoint
-Qwen    -> https://router.huggingface.co/v1/chat/completions
+The only independent service credentials required by the prototype are:
+
+```env
+CHROMA_API_KEY=...
+CHROMA_TENANT=...
+CHROMA_DATABASE=...
+SESSION_DATABASE_URL=postgresql://user:password@host:5432/database
 ```
 
-Provider-specific keys remain supported and take precedence. For example, `HARRIER_API_KEY` overrides `HF_TOKEN` for Harrier. SigLIP, VLM, and creative-image providers also reuse `HF_TOKEN` automatically **only when their configured URL is a Hugging Face-owned endpoint**. Docling and Chroma continue to use their own credentials.
+`CHROMA_TENANT` and `CHROMA_DATABASE` are identifiers rather than secrets, but are required by Chroma Cloud. Provider-specific model-key environment variables remain accepted only for backwards compatibility and custom non-HF deployments; they are not required for the HF-only profile.
 
-> Hugging Face serverless/provider availability and free credits are account/model dependent. For production, the same code can point at a dedicated HF Inference Endpoint by setting the provider URL explicitly.
+> Hugging Face provider/model availability and included credits are account dependent. A model that is unavailable through serverless Inference Providers can be deployed as a Hugging Face Inference Endpoint and still uses the same `HF_TOKEN`.
 
 # Provider/API contracts
 
@@ -397,11 +401,43 @@ You therefore do **not** need a separate Microsoft or Harrier API key. Set one H
 HF_TOKEN=hf_...
 ```
 
-`HARRIER_API_URL` and `HARRIER_API_KEY` are optional overrides for a dedicated endpoint. The adapter also supports OpenAI-compatible embedding endpoints when `HARRIER_API_STYLE=openai`.
+`HARRIER_API_URL` is an optional endpoint override. The adapter also supports OpenAI-compatible embedding endpoints when `HARRIER_API_STYLE=openai`.
 
-## Docling
+## Hugging Face reranker
 
-`DOCLING_API_URL` must expose a Docling Serve-compatible `/v1/convert/file` endpoint.
+The default hybrid retriever remains Harrier + BM25 + RRF. An optional multilingual second-stage reranker can now be served as a Hugging Face Text Embeddings Inference endpoint using `BAAI/bge-reranker-v2-m3`, an Apache-2.0 multilingual reranker.
+
+```env
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_API_URL=https://your-reranker.endpoints.huggingface.cloud
+RERANKER_API_STYLE=hf_tei
+RETRIEVAL_USE_RERANKER=true
+```
+
+No reranker key is needed; the endpoint uses `HF_TOKEN`. If `RERANKER_API_URL` is omitted, the service falls back to RRF without failing.
+
+## Granite Docling on Hugging Face
+
+Document understanding no longer requires a separate Docling Serve credential. The default model is `ibm-granite/granite-docling-258M` (Apache-2.0), consumed through a Hugging Face-compatible multimodal/chat endpoint with `HF_TOKEN`. The model is designed for document-page conversion and its official instruction is `Convert this page to docling.`
+
+The HF-only ingestion adapter works as follows:
+
+```text
+PDF  -> PyMuPDF renders pages -> Granite Docling HF endpoint
+Image -> Granite Docling HF endpoint
+PPTX -> deterministic python-pptx text/table extraction
+PPT   -> convert to PPTX before upload
+```
+
+Default configuration:
+
+```env
+DOCLING_MODEL=ibm-granite/granite-docling-258M
+DOCLING_API_URL=
+DOCLING_RENDER_DPI=144
+```
+
+If `DOCLING_API_URL` is blank, the application uses the Hugging Face OpenAI-compatible router. If that model is not available from a serverless provider in your account/region, deploy the same model as a Hugging Face Inference Endpoint and set `DOCLING_API_URL` to that endpoint; authentication still uses the same `HF_TOKEN`. Hugging Face supports image-text-to-text through its unified inference API and chat-compatible multimodal requests.
 
 ## SigLIP
 
@@ -447,7 +483,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure `HF_TOKEN`, Chroma, Docling, and any non-default vision endpoints in the deployment environment. See `.env.example`.
+Configure `HF_TOKEN`, Chroma Cloud, the session database, and the Hugging Face endpoint URLs used for SigLIP/VLM/reranking as needed. See `.env.example`.
 
 The application never requires local Harrier, Qwen, SigLIP, VLM or image-generation weights.
 
