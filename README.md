@@ -424,3 +424,16 @@ python -m scripts.run_phase4 \
 ```
 
 Phase 4 ends with `state["canonical_response"]`. Phase 5 should consume that CRR and perform semantic evidence verification plus repair.
+
+
+## Phase 5 — verification and repair
+
+Phase 5 adds claim-level semantic verification, deterministic critical-literal checks, locally computed faithfulness metrics, and a capped LangGraph repair loop. See `PHASE5.md`.
+
+Pipeline through Phase 5:
+
+```text
+ingest -> chunk -> Harrier/Chroma -> retrieve -> CRR -> verify -> repair (bounded) -> verified CRR
+```
+
+Run with `python -m scripts.run_phase5 ...`.

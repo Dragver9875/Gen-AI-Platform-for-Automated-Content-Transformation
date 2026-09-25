@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TransformationConfig(BaseModel):
@@ -77,6 +77,13 @@ class CanonicalResponse(BaseModel):
     claims: list[CRRClaim] = Field(default_factory=list)
     rendering: RenderingHints = Field(default_factory=RenderingHints)
     insufficiencies: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_claim_ids(self):
+        ids = [claim.claim_id for claim in self.claims]
+        if len(ids) != len(set(ids)):
+            raise ValueError("CRR claim_id values must be unique")
+        return self
 
 
 class DigestClaim(BaseModel):

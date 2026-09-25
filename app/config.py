@@ -96,6 +96,21 @@ class Settings:
     phase4_group_context_max_chars: int
     phase4_digest_max_tokens: int
 
+    # Phase 5 factuality verification + bounded repair
+    verifier_api_url: str | None
+    verifier_api_key: str | None
+    verifier_api_style: str
+    verifier_model: str | None
+    verifier_response_mode: str
+    phase5_verification_temperature: float
+    phase5_verification_max_tokens: int
+    phase5_repair_temperature: float
+    phase5_repair_max_tokens: int
+    phase5_max_repair_attempts: int
+    phase5_min_faithfulness_score: float
+    phase5_max_claims_per_call: int
+    phase5_evidence_chars_per_claim: int
+
     # HTTP
     http_timeout_s: float
     http_retries: int
@@ -146,6 +161,19 @@ class Settings:
             phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),
             phase4_group_context_max_chars=_env_int("PHASE4_GROUP_CONTEXT_MAX_CHARS", 18000),
             phase4_digest_max_tokens=_env_int("PHASE4_DIGEST_MAX_TOKENS", 2048),
+            verifier_api_url=_env("VERIFIER_API_URL"),
+            verifier_api_key=_env("VERIFIER_API_KEY"),
+            verifier_api_style=(_env("VERIFIER_API_STYLE", "openai") or "openai").lower(),
+            verifier_model=_env("VERIFIER_MODEL"),
+            verifier_response_mode=(_env("VERIFIER_RESPONSE_MODE", "json_object") or "json_object").lower(),
+            phase5_verification_temperature=_env_float("PHASE5_VERIFICATION_TEMPERATURE", 0.0),
+            phase5_verification_max_tokens=_env_int("PHASE5_VERIFICATION_MAX_TOKENS", 4096),
+            phase5_repair_temperature=_env_float("PHASE5_REPAIR_TEMPERATURE", 0.05),
+            phase5_repair_max_tokens=_env_int("PHASE5_REPAIR_MAX_TOKENS", 4096),
+            phase5_max_repair_attempts=_env_int("PHASE5_MAX_REPAIR_ATTEMPTS", 2),
+            phase5_min_faithfulness_score=_env_float("PHASE5_MIN_FAITHFULNESS_SCORE", 1.0),
+            phase5_max_claims_per_call=_env_int("PHASE5_MAX_CLAIMS_PER_CALL", 12),
+            phase5_evidence_chars_per_claim=_env_int("PHASE5_EVIDENCE_CHARS_PER_CLAIM", 8000),
             http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),
             http_retries=_env_int("HTTP_RETRIES", 2),
         )

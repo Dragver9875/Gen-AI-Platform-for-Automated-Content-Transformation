@@ -41,6 +41,13 @@ class AgentState(TypedDict, total=False):
     section_digests: list[dict[str, Any]]
     generation_metadata: dict[str, Any]
 
+    # Phase 5 factuality verification / repair
+    verification_report: dict[str, Any]
+    verification_metadata: dict[str, Any]
+    verification_requires_repair: bool
+    repair_attempts: int
+    max_repair_attempts: int
+
     status: str
     warnings: list[str]
     errors: list[str]
