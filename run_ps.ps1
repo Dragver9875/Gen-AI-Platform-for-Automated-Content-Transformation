@@ -86,7 +86,7 @@ if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
     throw ".env is missing. Run .\setup.ps1 first, then populate the required credentials."
 }
 
-$required = @("HF_TOKEN", "CHROMA_API_KEY", "CHROMA_TENANT", "CHROMA_DATABASE", "SIGLIP_API_URL", "VLM_API_URL")
+$required = @("HF_TOKEN", "CHROMA_API_KEY", "CHROMA_TENANT", "CHROMA_DATABASE")
 $missing = @()
 foreach ($name in $required) {
     $value = Get-DotEnvValue -Name $name

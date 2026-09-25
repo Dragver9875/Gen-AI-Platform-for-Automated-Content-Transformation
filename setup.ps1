@@ -216,8 +216,6 @@ Write-Host "       HF_TOKEN"
 Write-Host "       CHROMA_API_KEY"
 Write-Host "       CHROMA_TENANT"
 Write-Host "       CHROMA_DATABASE"
-Write-Host "       SIGLIP_API_URL"
-Write-Host "       VLM_API_URL"
 if (-not $UseMemorySessions) {
     Write-Host "       SESSION_DATABASE_URL  (when SESSION_STORE_BACKEND=postgres)"
 }
