@@ -9,7 +9,7 @@ Implemented:
 - **Phase 1** — Retrieval and indexing
 - **Phase 2** — Adaptive multimodal ingestion
 - **Phase 3** — LangGraph orchestration and user sessions
-- **Phase 4** — Hosted SLM generation and Canonical Response Representation (CRR)
+- **Phase 4** — Hosted open-source LLM generation and Canonical Response Representation (CRR)
 - **Phase 5** — Factuality verification and bounded repair
 - **Phase 6** — Generic artifact generation
 - **Phase 9** — Evaluation, quality metrics, and runtime telemetry
@@ -77,7 +77,7 @@ Chroma Cloud
           Context Builder
                 |
                 v
-          Hosted SLM API
+          Hosted open-source LLM API
                 |
                 v
                CRR
@@ -158,9 +158,9 @@ Session characteristics:
 - memory store for development
 - PostgreSQL session store/checkpointer hooks for deployment
 
-# Phase 4 — Hosted SLM generation + CRR
+# Phase 4 — Hosted open-source LLM generation + CRR
 
-The Hosted SLM generates a format-independent Canonical Response Representation containing:
+The hosted open-source LLM generates a format-independent Canonical Response Representation containing:
 
 - artifact type
 - title / summary
@@ -390,7 +390,9 @@ Expected custom endpoint payload:
 }
 ```
 
-## Hosted SLM
+## Hosted open-source LLM
+
+Default model: `Qwen/Qwen3-30B-A3B-Instruct-2507` (Apache-2.0). It is consumed only through a hosted API endpoint; no Qwen weights are bundled with or loaded by this repository. `LLM_MODEL` remains configurable.
 
 Supported modes:
 
@@ -414,7 +416,7 @@ cp .env.example .env
 
 Configure the provider endpoints/credentials in the deployment environment.
 
-The application never requires local Harrier, Granite, SigLIP, VLM or image-generation weights.
+The application never requires local Harrier, Qwen, SigLIP, VLM or image-generation weights.
 
 # Main CLIs
 

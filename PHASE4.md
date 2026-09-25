@@ -6,7 +6,7 @@ Phase 4 consumes the Phase 3 retrieval handoff and produces a format-independent
 
 ## Added files
 
-- `providers/llm.py` — hosted SLM adapter (`openai` and `hf` endpoint styles)
+- `providers/llm.py` — hosted open-source LLM adapter (`openai` and `hf` endpoint styles)
 - `generation/crr.py` — transformation config, CRR, section-digest schemas
 - `generation/prompts.py` — source-grounded structured-output prompts
 - `generation/service.py` — QA and hierarchical transformation generation
@@ -43,3 +43,8 @@ Phase 4 guarantees:
 5. Long-document transformations use hierarchical section coverage.
 
 Phase 4 does **not** decide whether a cited chunk truly entails a claim. Phase 5 must perform that verification and repair unsupported claims.
+
+
+## Default open-source LLM
+
+The default Phase 4 model is `Qwen/Qwen3-30B-A3B-Instruct-2507` (Apache-2.0), accessed only through the configured hosted API. The model name and endpoint remain environment-configurable.

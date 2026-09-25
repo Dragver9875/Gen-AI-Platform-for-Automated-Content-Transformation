@@ -12,7 +12,7 @@ _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.IGNORECASE | re
 
 
 class HostedLLMProvider:
-    """Provider-agnostic hosted text-generation adapter.
+    """Provider-agnostic hosted open-source LLM adapter.
 
     Supported endpoint styles:
       * openai: OpenAI-compatible chat-completions endpoint.

@@ -45,21 +45,21 @@ Default formats:
 
 ## PDF
 
-The SLM generates complete Typst source. The serializer only validates and compiles it. If Typst is not available, the generated `.typ` source is preserved and the artifact is returned with `status=source_only` rather than silently falling back to another decoder.
+The LLM generates complete Typst source. The serializer only validates and compiles it. If Typst is not available, the generated `.typ` source is preserved and the artifact is returned with `status=source_only` rather than silently falling back to another decoder.
 
 For deployment, install the Typst CLI in the application image and set `PHASE6_TYPST_BINARY` when it is not on `PATH`.
 
 ## PPTX
 
-The SLM generates a `PresentationIR`; `python-pptx` serializes that IR into an editable `.pptx`. The serializer does not decide the content, slide ordering, or narrative.
+The LLM generates a `PresentationIR`; `python-pptx` serializes that IR into an editable `.pptx`. The serializer does not decide the content, slide ordering, or narrative.
 
 ## Factual image / infographic
 
-The SLM emits a complete SVG. Active/external content is rejected before writing the file.
+The LLM emits a complete SVG. Active/external content is rejected before writing the file.
 
 ## Creative image
 
-The SLM first creates a `CreativeImageIR` prompt. A hosted image-generation endpoint (for example a hosted FLUX endpoint) returns the actual image bytes. No image-generation weights are loaded by this repo.
+The LLM first creates a `CreativeImageIR` prompt. A hosted image-generation endpoint (for example a hosted FLUX endpoint) returns the actual image bytes. No image-generation weights are loaded by this repo.
 
 ## Security boundary
 

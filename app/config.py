@@ -92,7 +92,7 @@ class Settings:
     phase3_default_top_k: int
     phase3_context_max_chars: int
 
-    # Phase 4 hosted SLM + CRR generation
+    # Phase 4 hosted open-source LLM + CRR generation
     llm_api_url: str | None
     llm_api_key: str | None
     llm_api_style: str
@@ -184,7 +184,7 @@ class Settings:
             llm_api_url=_env("LLM_API_URL"),
             llm_api_key=_env("LLM_API_KEY"),
             llm_api_style=(_env("LLM_API_STYLE", "openai") or "openai").lower(),
-            llm_model=_env("LLM_MODEL"),
+            llm_model=_env("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
             llm_response_mode=(_env("LLM_RESPONSE_MODE", "json_object") or "json_object").lower(),
             phase4_temperature=_env_float("PHASE4_TEMPERATURE", 0.1),
             phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),

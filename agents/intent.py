@@ -35,7 +35,7 @@ class IntentDecision:
 class IntentRouter:
     """Deterministic Phase 3 intent router.
 
-    Phase 4 can later replace this with an SLM classifier without changing the
+    A future release can replace this with a hosted LLM classifier without changing the
     graph contract. Explicit request_mode always wins over heuristic routing.
     """
 
