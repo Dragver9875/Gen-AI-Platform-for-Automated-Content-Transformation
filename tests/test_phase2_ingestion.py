@@ -23,6 +23,7 @@ class FakeDocling:
         return doc["md_content"], doc["json_content"]
 
 
+class FakeSiglip:
     def __init__(self, label="photograph"):
         self.label = label
 
