@@ -64,11 +64,18 @@ class Settings:
     vlm_api_url: str
     vlm_api_key: str
 
+    # User sessions
+    session_store_backend: str
+    session_database_url: str | None
+    session_table: str
+
     # Ingestion routing
     pdf_native_text_chars: int
     pdf_image_coverage_threshold: float
     pdf_visual_fallback_enabled: bool
     pdf_visual_fallback_max_pages: int
+    siglip_document_labels: tuple[str, ...]
+    pdf_visual_prompt: str
 
     # Chunking
     chunk_target_chars: int
@@ -106,10 +113,15 @@ class Settings:
             siglip_api_key=_env("SIGLIP_API_KEY", required=True),  # type: ignore[arg-type]
             vlm_api_url=_env("VLM_API_URL", required=True),  # type: ignore[arg-type]
             vlm_api_key=_env("VLM_API_KEY", required=True),  # type: ignore[arg-type]
+            session_store_backend=(_env("SESSION_STORE_BACKEND", "memory") or "memory").lower(),
+            session_database_url=_env("SESSION_DATABASE_URL"),
+            session_table=_env("SESSION_TABLE", "user_sessions") or "user_sessions",
             pdf_native_text_chars=_env_int("PDF_NATIVE_TEXT_CHARS", 80),
             pdf_image_coverage_threshold=_env_float("PDF_IMAGE_COVERAGE_THRESHOLD", 0.72),
             pdf_visual_fallback_enabled=_env_bool("PDF_VISUAL_FALLBACK_ENABLED", True),
             pdf_visual_fallback_max_pages=_env_int("PDF_VISUAL_FALLBACK_MAX_PAGES", 12),
+            siglip_document_labels=tuple(x.strip().lower() for x in (_env("SIGLIP_DOCUMENT_LABELS", "document page,screenshot") or "").split(",") if x.strip()),
+            pdf_visual_prompt=_env("PDF_VISUAL_PROMPT", "Describe this PDF page faithfully for retrieval. Preserve all visible text, labels, numbers, chart trends, diagram relationships, and important visual content. If it is primarily a scanned text page, transcribe the meaningful content.") or "",
             chunk_target_chars=_env_int("CHUNK_TARGET_CHARS", 3200),
             chunk_overlap_chars=_env_int("CHUNK_OVERLAP_CHARS", 450),
             phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),

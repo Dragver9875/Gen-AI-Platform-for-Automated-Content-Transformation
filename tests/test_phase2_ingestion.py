@@ -61,8 +61,9 @@ def test_text_ingestion_and_chunking(tmp_path: Path):
     )
     result = router.ingest(file)
     assert result.strategy == "text-direct"
-    chunks = StructureAwareChunker(target_chars=100, overlap_chars=0).chunk(result, session_id="s1")
+    chunks = StructureAwareChunker(target_chars=100, overlap_chars=0).chunk(result, user_id="u1", session_id="s1")
     assert len(chunks) == 1
+    assert chunks[0].metadata["user_id"] == "u1"
     assert chunks[0].metadata["session_id"] == "s1"
 
 

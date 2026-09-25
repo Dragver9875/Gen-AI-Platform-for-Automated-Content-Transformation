@@ -299,3 +299,44 @@ The following intentionally belong to later phases:
 ## Security
 
 Never expose provider keys in the frontend or commit them to Git. Keep them in deployment secrets/environment variables.
+
+
+## User sessions and multi-tenant isolation
+
+Phase 3 now treats `user_id + session_id` as the isolation boundary. The same session ID may safely exist for different users. LangGraph thread IDs are generated as a stable SHA-256-derived key so raw user identifiers are not stored in the checkpoint key. Chroma metadata and all retrieval filters include both `user_id` and `session_id`.
+
+Session operations are available through `Phase3Orchestrator`:
+
+```python
+session = agent.create_session("user-123", title="Incident report review")
+state = agent.invoke(
+    user_id="user-123",
+    session_id=session["session_id"],
+    source_paths=["report.pdf"],
+)
+all_sessions = agent.list_sessions("user-123")
+agent.rename_session("user-123", session["session_id"], "Updated title")
+agent.delete_session("user-123", session["session_id"])
+```
+
+The session registry is pluggable:
+
+- `SESSION_STORE_BACKEND=memory` — tests/single-process development only.
+- `SESSION_STORE_BACKEND=postgres` — recommended for deployed multi-instance systems.
+
+For production LangGraph state persistence, inject a PostgreSQL checkpointer rather than relying on the development `InMemorySaver`. `app/checkpointing.py` provides a helper using `langgraph-checkpoint-postgres`. Run its `.setup()` migration once during deployment.
+
+### Generalization / configuration
+
+There are no embedded provider URLs, API keys, local model paths, CUDA assumptions, user IDs, or session IDs. Provider endpoints and credentials are environment-driven. Retrieval limits, chunk sizes, PDF routing thresholds, SigLIP document labels, the Harrier query instruction, the PDF visual prompt, Chroma collection, HTTP retry/timeout behavior, and session persistence backend are configurable.
+
+Some defaults remain intentionally opinionated but are not deployment assumptions: supported file extensions, default routing thresholds, default `top_k`, context-size limit, and fallback prompt text. They can be changed without modifying the pipeline architecture; the most deployment-sensitive ones are exposed in `.env.example`.
+
+### Session CLI
+
+```bash
+python -m scripts.manage_sessions --user-id user-123 create --title "Threat report"
+python -m scripts.manage_sessions --user-id user-123 list
+python -m scripts.manage_sessions --user-id user-123 rename SESSION_ID "New title"
+python -m scripts.manage_sessions --user-id user-123 delete SESSION_ID
+```

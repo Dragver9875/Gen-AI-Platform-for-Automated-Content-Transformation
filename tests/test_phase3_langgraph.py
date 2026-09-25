@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agents.graph import Phase3Orchestrator, build_phase3_graph
 from app.schemas import Chunk, IngestionResult, SourceElement
+from app.sessions import InMemorySessionStore, UserSessionManager
 
 
 class FakeRetriever:
@@ -16,6 +17,7 @@ class FakeRetriever:
                 "text": "Threat activity increased by 32 percent.",
                 "metadata": {
                     "chunk_id": "c1",
+                    "user_id": "u1",
                     "session_id": "s1",
                     "source_id": "src-1",
                     "filename": "report.txt",
@@ -31,6 +33,7 @@ class FakeRetriever:
                 "text": "Enable multi-factor authentication for privileged accounts.",
                 "metadata": {
                     "chunk_id": "c2",
+                    "user_id": "u1",
                     "session_id": "s1",
                     "source_id": "src-1",
                     "filename": "report.txt",
@@ -57,8 +60,8 @@ class FakePipeline:
         self.retriever = FakeRetriever()
         self.ingest_calls = []
 
-    def ingest_and_index(self, path, *, session_id):
-        self.ingest_calls.append((str(path), session_id))
+    def ingest_and_index(self, path, *, user_id, session_id):
+        self.ingest_calls.append((str(path), user_id, session_id))
         result = IngestionResult(
             source_id="src-1",
             filename=Path(path).name,
@@ -71,6 +74,7 @@ class FakePipeline:
             "hello",
             {
                 "chunk_id": "c1",
+                "user_id": user_id,
                 "session_id": session_id,
                 "source_id": "src-1",
                 "filename": Path(path).name,
@@ -82,7 +86,8 @@ class FakePipeline:
 def make_agent() -> tuple[Phase3Orchestrator, FakePipeline]:
     pipeline = FakePipeline()
     graph = build_phase3_graph(pipeline, default_top_k=5, context_max_chars=10000)
-    return Phase3Orchestrator(graph), pipeline
+    sessions = UserSessionManager(InMemorySessionStore())
+    return Phase3Orchestrator(graph, session_manager=sessions, pipeline=pipeline), pipeline
 
 
 def test_index_only_then_resume_same_session_for_qa(tmp_path: Path):
@@ -90,13 +95,13 @@ def test_index_only_then_resume_same_session_for_qa(tmp_path: Path):
     file.write_text("source", encoding="utf-8")
     agent, pipeline = make_agent()
 
-    indexed = agent.invoke(session_id="s1", source_paths=[str(file)])
+    indexed = agent.invoke(user_id="u1", session_id="s1", source_paths=[str(file)])
     assert indexed["status"] == "indexed_ready"
     assert indexed["detected_intent"] == "index_only"
     assert indexed["active_source_ids"] == ["src-1"]
     assert indexed["pending_source_paths"] == []
 
-    answered = agent.invoke(session_id="s1", query="What increased?")
+    answered = agent.invoke(user_id="u1", session_id="s1", query="What increased?")
     assert answered["status"] == "phase4_ready"
     assert answered["detected_intent"] == "qa"
     assert answered["retrieval_mode"] == "hybrid_top_k"
@@ -111,6 +116,7 @@ def test_transform_routes_to_full_document_hierarchy(tmp_path: Path):
     agent, pipeline = make_agent()
 
     state = agent.invoke(
+        user_id="u1",
         session_id="s1",
         source_paths=[str(file)],
         query="Summarize this complete report into an executive briefing",
@@ -128,6 +134,7 @@ def test_explicit_mode_overrides_heuristic(tmp_path: Path):
     file.write_text("source", encoding="utf-8")
     agent, _ = make_agent()
     state = agent.invoke(
+        user_id="u1",
         session_id="s1",
         source_paths=[str(file)],
         query="Summarize the recommendations?",
@@ -139,7 +146,7 @@ def test_explicit_mode_overrides_heuristic(tmp_path: Path):
 
 def test_missing_source_returns_error():
     agent, _ = make_agent()
-    state = agent.invoke(session_id="empty", query="What does the report say?")
+    state = agent.invoke(user_id="u1", session_id="empty", query="What does the report say?")
     assert state["status"] == "error"
     assert state["detected_intent"] == "error"
     assert any("No indexed sources" in err for err in state["errors"])
@@ -147,7 +154,7 @@ def test_missing_source_returns_error():
 
 def test_missing_file_returns_error(tmp_path: Path):
     agent, _ = make_agent()
-    state = agent.invoke(session_id="s1", source_paths=[str(tmp_path / "missing.pdf")])
+    state = agent.invoke(user_id="u1", session_id="s1", source_paths=[str(tmp_path / "missing.pdf")])
     assert state["status"] == "error"
     assert any("Source file not found" in err for err in state["errors"])
 
@@ -157,8 +164,22 @@ def test_artifact_word_inside_question_stays_qa(tmp_path: Path):
     file.write_text("source", encoding="utf-8")
     agent, _ = make_agent()
     state = agent.invoke(
+        user_id="u1",
         session_id="s1",
         source_paths=[str(file)],
         query="What does the executive summary say?",
     )
     assert state["detected_intent"] == "qa"
+
+
+def test_same_session_id_does_not_share_langgraph_state_across_users(tmp_path: Path):
+    file = tmp_path / "report.txt"
+    file.write_text("source", encoding="utf-8")
+    agent, _ = make_agent()
+
+    alice = agent.invoke(user_id="alice", session_id="shared", source_paths=[str(file)])
+    assert alice["active_source_ids"] == ["src-1"]
+
+    bob = agent.invoke(user_id="bob", session_id="shared", query="What does the report say?")
+    assert bob["status"] == "error"
+    assert any("No indexed sources" in err for err in bob["errors"])

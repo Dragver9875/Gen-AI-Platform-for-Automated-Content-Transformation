@@ -46,11 +46,11 @@ def test_hybrid_retriever_indexes_and_filters():
     store = FakeStore()
     retriever = HybridRetriever(store, FakeEmbedder())
     chunks = [
-        {"text": "ransomware mitigation guidance", "metadata": {"chunk_id": "a", "session_id": "s1", "source_id": "x"}},
-        {"text": "flood response advisory", "metadata": {"chunk_id": "b", "session_id": "s2", "source_id": "y"}},
+        {"text": "ransomware mitigation guidance", "metadata": {"chunk_id": "a", "user_id": "u1", "session_id": "s1", "source_id": "x"}},
+        {"text": "flood response advisory", "metadata": {"chunk_id": "b", "user_id": "u2", "session_id": "s2", "source_id": "y"}},
     ]
     assert retriever.index_chunks(chunks) == 2
-    where = {"$and": [{"session_id": "s1"}, {"source_id": "x"}]}
+    where = {"$and": [{"user_id": "u1"}, {"session_id": "s1"}, {"source_id": "x"}]}
     result = retriever.retrieve("ransomware", where=where, final_k=2)
     assert len(result) == 1
     assert result[0]["id"] == "a"
@@ -70,5 +70,5 @@ def test_phase12_facade_retrieval_filter_shape():
             return [{"query": query, "where": where, "final_k": final_k}]
 
     pipeline = Phase12Pipeline(DummyRouter(), DummyChunker(), CaptureRetriever())
-    result = pipeline.retrieve("hello", session_id="s1", source_id="src", final_k=3)
-    assert result[0]["where"] == {"$and": [{"session_id": "s1"}, {"source_id": "src"}]}
+    result = pipeline.retrieve("hello", user_id="u1", session_id="s1", source_id="src", final_k=3)
+    assert result[0]["where"] == {"$and": [{"user_id": "u1"}, {"session_id": "s1"}, {"source_id": "src"}]}

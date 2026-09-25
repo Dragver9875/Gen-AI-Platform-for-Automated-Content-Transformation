@@ -13,6 +13,7 @@ from providers.vlm import VLMProvider
 from retrieval.hybrid_retrieval import HybridRetriever
 from app.phase12 import Phase12Pipeline
 from app.phase3 import create_phase3_orchestrator
+from app.sessions import InMemorySessionStore, PostgresSessionStore, UserSessionManager
 
 
 def build_phase12(settings: Settings):
@@ -44,6 +45,8 @@ def build_phase12(settings: Settings):
         ),
         enable_pdf_visual_fallback=settings.pdf_visual_fallback_enabled,
         pdf_visual_fallback_max_pages=settings.pdf_visual_fallback_max_pages,
+        document_like_image_labels=set(settings.siglip_document_labels),
+        pdf_visual_prompt=settings.pdf_visual_prompt,
     )
     chunker = StructureAwareChunker(
         target_chars=settings.chunk_target_chars,
@@ -73,11 +76,24 @@ def build_phase12(settings: Settings):
     return Phase12Pipeline(router, chunker, retriever)
 
 
+def build_session_manager(settings: Settings) -> UserSessionManager:
+    backend = settings.session_store_backend.lower()
+    if backend == "memory":
+        return UserSessionManager(InMemorySessionStore())
+    if backend == "postgres":
+        if not settings.session_database_url:
+            raise ValueError("SESSION_DATABASE_URL is required when SESSION_STORE_BACKEND=postgres")
+        return UserSessionManager(PostgresSessionStore(settings.session_database_url, table=settings.session_table))
+    raise ValueError(f"Unsupported SESSION_STORE_BACKEND: {settings.session_store_backend}")
+
+
 def build_phase3(settings: Settings, *, checkpointer=None):
     pipeline = build_phase12(settings)
+    sessions = build_session_manager(settings)
     return create_phase3_orchestrator(
         pipeline,
         default_top_k=settings.phase3_default_top_k,
         context_max_chars=settings.phase3_context_max_chars,
         checkpointer=checkpointer,
+        session_manager=sessions,
     )

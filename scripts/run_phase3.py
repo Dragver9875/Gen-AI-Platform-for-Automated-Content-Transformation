@@ -9,6 +9,7 @@ from app.factory import build_phase3
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Phase 3 LangGraph orchestrator.")
+    parser.add_argument("--user-id", required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--file", action="append", default=[], help="Source file; repeat for multiple files.")
     parser.add_argument("--query", default="")
@@ -18,6 +19,7 @@ def main() -> None:
 
     agent = build_phase3(Settings.from_env())
     state = agent.invoke(
+        user_id=args.user_id,
         session_id=args.session_id,
         query=args.query,
         source_paths=args.file,

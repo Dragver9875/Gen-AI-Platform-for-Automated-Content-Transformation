@@ -10,6 +10,7 @@ from app.factory import build_phase12
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest, chunk, index and optionally retrieve from a file.")
     parser.add_argument("file")
+    parser.add_argument("--user-id", required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--query")
     parser.add_argument("--top-k", type=int, default=5)
@@ -17,7 +18,7 @@ def main() -> None:
 
     settings = Settings.from_env()
     pipeline = build_phase12(settings)
-    result, chunks = pipeline.ingest_and_index(args.file, session_id=args.session_id)
+    result, chunks = pipeline.ingest_and_index(args.file, user_id=args.user_id, session_id=args.session_id)
 
     print(json.dumps({
         "source_id": result.source_id,
@@ -28,7 +29,10 @@ def main() -> None:
     }, indent=2))
 
     if args.query:
-        docs = pipeline.retrieve(args.query, session_id=args.session_id, source_id=result.source_id, final_k=args.top_k)
+        docs = pipeline.retrieve(
+            args.query, user_id=args.user_id, session_id=args.session_id,
+            source_id=result.source_id, final_k=args.top_k
+        )
         print(json.dumps(docs, indent=2, ensure_ascii=False))
 
 

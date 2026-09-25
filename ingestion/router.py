@@ -17,9 +17,6 @@ from providers.vlm import VLMProvider
 _TEXT_SUFFIXES = {".txt", ".md"}
 _DOCUMENT_SUFFIXES = {".pdf", ".ppt", ".pptx"}
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
-_DOC_LIKE_IMAGE_LABELS = {"document page", "screenshot"}
-
-
 class IngestionRouter:
     def __init__(
         self,
@@ -30,6 +27,8 @@ class IngestionRouter:
         pdf_preflight: PdfPreflight,
         enable_pdf_visual_fallback: bool = True,
         pdf_visual_fallback_max_pages: int = 12,
+        document_like_image_labels: set[str] | None = None,
+        pdf_visual_prompt: str | None = None,
     ):
         self.docling = docling
         self.siglip = siglip
@@ -37,6 +36,12 @@ class IngestionRouter:
         self.pdf_preflight = pdf_preflight
         self.enable_pdf_visual_fallback = enable_pdf_visual_fallback
         self.pdf_visual_fallback_max_pages = pdf_visual_fallback_max_pages
+        self.document_like_image_labels = {x.strip().lower() for x in (document_like_image_labels or {"document page", "screenshot"}) if x.strip()}
+        self.pdf_visual_prompt = pdf_visual_prompt or (
+            "Describe this PDF page faithfully for retrieval. Preserve all visible text, labels, "
+            "numbers, chart trends, diagram relationships, and important visual content. "
+            "If it is primarily a scanned text page, transcribe the meaningful content."
+        )
 
     def ingest(self, path: str | Path) -> IngestionResult:
         file_path = Path(path)
@@ -103,11 +108,7 @@ class IngestionRouter:
                     png = self.pdf_preflight.render_page_png(path, page_number)
                     description = self.vlm.describe_bytes(
                         png,
-                        prompt=(
-                            "Describe this PDF page faithfully for retrieval. Preserve all visible text, labels, "
-                            "numbers, chart trends, diagram relationships, and important visual content. "
-                            "If it is primarily a scanned text page, transcribe the meaningful content."
-                        ),
+                        prompt=self.pdf_visual_prompt,
                     )
                     if description.strip():
                         elements.append(
@@ -139,7 +140,7 @@ class IngestionRouter:
     def _ingest_image(self, path: Path, source_id: str, media_type: str) -> IngestionResult:
         predictions = self.siglip.classify(path)
         top_label = str(predictions[0]["label"]).lower() if predictions else "other visual"
-        if top_label in _DOC_LIKE_IMAGE_LABELS:
+        if top_label in self.document_like_image_labels:
             converted = self.docling.convert_file(path, do_ocr=True, force_ocr=True, enrich_pictures=True)
             markdown, doc_json = self.docling.document_payload(converted)
             elements = elements_from_docling_json(doc_json) if doc_json else elements_from_markdown(markdown)

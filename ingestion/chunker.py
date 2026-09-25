@@ -12,7 +12,7 @@ class StructureAwareChunker:
         self.target_chars = target_chars
         self.overlap_chars = overlap_chars
 
-    def chunk(self, result: IngestionResult, *, session_id: str) -> list[Chunk]:
+    def chunk(self, result: IngestionResult, *, user_id: str, session_id: str) -> list[Chunk]:
         chunks: list[Chunk] = []
         buffer: list[SourceElement] = []
         size = 0
@@ -28,13 +28,14 @@ class StructureAwareChunker:
                 return
             first = buffer[0]
             last = buffer[-1]
-            seed = f"{session_id}:{result.source_id}:{len(chunks)}:{text[:160]}".encode("utf-8")
+            seed = f"{user_id}:{session_id}:{result.source_id}:{len(chunks)}:{text[:160]}".encode("utf-8")
             chunk_id = hashlib.sha1(seed).hexdigest()[:24]
             pages = [e.page for e in buffer if e.page is not None]
             slides = [e.slide for e in buffer if e.slide is not None]
             sections = [e.section for e in buffer if e.section]
             metadata = {
                 "chunk_id": chunk_id,
+                "user_id": user_id,
                 "session_id": session_id,
                 "source_id": result.source_id,
                 "filename": result.filename,

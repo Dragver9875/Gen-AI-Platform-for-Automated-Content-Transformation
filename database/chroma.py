@@ -62,5 +62,13 @@ class ChromaCloudStore:
             for idx, text, metadata in zip(result["ids"], result["documents"], result["metadatas"])
         ]
 
-    def delete_source(self, session_id: str, source_id: str) -> None:
-        self.collection.delete(where={"$and": [{"session_id": session_id}, {"source_id": source_id}]})
+    def delete_source(self, user_id: str, session_id: str, source_id: str) -> None:
+        self.collection.delete(where={"$and": [
+            {"user_id": user_id}, {"session_id": session_id}, {"source_id": source_id}
+        ]})
+
+    def delete_session(self, user_id: str, session_id: str) -> None:
+        self.collection.delete(where={"$and": [{"user_id": user_id}, {"session_id": session_id}]})
+
+    def delete_user(self, user_id: str) -> None:
+        self.collection.delete(where={"user_id": user_id})

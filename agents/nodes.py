@@ -13,8 +13,8 @@ def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(v for v in values if v))
 
 
-def _where(session_id: str, source_ids: list[str] | None = None) -> dict[str, Any]:
-    clauses: list[dict[str, Any]] = [{"session_id": session_id}]
+def _where(user_id: str, session_id: str, source_ids: list[str] | None = None) -> dict[str, Any]:
+    clauses: list[dict[str, Any]] = [{"user_id": user_id}, {"session_id": session_id}]
     ids = _unique(source_ids or [])
     if len(ids) == 1:
         clauses.append({"source_id": ids[0]})
@@ -38,7 +38,14 @@ class Phase3Nodes:
         self.intent_router = intent_router or IntentRouter()
 
     def initialize(self, state: AgentState) -> dict[str, Any]:
+        user_id = str(state.get("user_id") or "").strip()
         session_id = str(state.get("session_id") or "").strip()
+        if not user_id:
+            return {
+                "status": "error",
+                "errors": ["user_id is required."],
+                "detected_intent": "error",
+            }
         if not session_id:
             return {
                 "status": "error",
@@ -46,6 +53,7 @@ class Phase3Nodes:
                 "detected_intent": "error",
             }
         return {
+            "user_id": user_id,
             "session_id": session_id,
             "status": "initialized",
             "warnings": list(state.get("warnings") or []),
@@ -68,7 +76,7 @@ class Phase3Nodes:
                 errors.append(f"Source file not found: {raw_path}")
                 continue
             try:
-                result, chunks = self.pipeline.ingest_and_index(path, session_id=state["session_id"])
+                result, chunks = self.pipeline.ingest_and_index(path, user_id=state["user_id"], session_id=state["session_id"])
                 active.append(result.source_id)
                 warnings.extend(result.warnings)
                 ingested.append({
@@ -127,7 +135,7 @@ class Phase3Nodes:
 
     def retrieve_qa(self, state: AgentState) -> dict[str, Any]:
         selected = list(state.get("selected_source_ids") or state.get("active_source_ids") or [])
-        where = _where(state["session_id"], selected)
+        where = _where(state["user_id"], state["session_id"], selected)
         docs = self.pipeline.retriever.retrieve(
             str(state.get("query") or ""),
             where=where,
@@ -141,7 +149,7 @@ class Phase3Nodes:
 
     def retrieve_transform(self, state: AgentState) -> dict[str, Any]:
         selected = list(state.get("selected_source_ids") or state.get("active_source_ids") or [])
-        where = _where(state["session_id"], selected)
+        where = _where(state["user_id"], state["session_id"], selected)
         docs = self.pipeline.retriever.get_corpus(where=where)
         return {
             "retrieved_documents": docs,
