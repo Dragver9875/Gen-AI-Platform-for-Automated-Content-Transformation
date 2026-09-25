@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 
 class ConfigurationError(RuntimeError):
@@ -32,18 +33,61 @@ def _env_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def _is_huggingface_url(url: str | None) -> bool:
+    if not url:
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    return (
+        host == "huggingface.co"
+        or host.endswith(".huggingface.co")
+        or host.endswith(".huggingface.cloud")
+    )
+
+
+def _provider_key(
+    env_name: str,
+    *,
+    api_url: str | None,
+    hf_token: str | None,
+    required: bool = False,
+) -> str | None:
+    """Resolve an endpoint credential safely.
+
+    A shared HF_TOKEN is only reused for Hugging Face-owned router/endpoint URLs.
+    This avoids accidentally forwarding a Hugging Face token to an unrelated
+    third-party URL when a provider-specific key is omitted.
+    """
+    explicit = _env(env_name)
+    if explicit:
+        return explicit
+    if hf_token and _is_huggingface_url(api_url):
+        return hf_token
+    if required:
+        raise ConfigurationError(
+            f"Missing required environment variable: {env_name}. "
+            "For Hugging Face endpoints you may set HF_TOKEN instead."
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class Settings:
+    # Shared Hugging Face credential. Used only for Hugging Face-owned URLs.
+    hf_token: str | None
+
     # Chroma Cloud
     chroma_api_key: str
     chroma_tenant: str
     chroma_database: str
     chroma_collection: str
 
-    # Harrier hosted endpoint
+    # Harrier hosted/serverless endpoint
     harrier_api_url: str
     harrier_api_key: str
     harrier_api_style: str
+    harrier_model: str
+    harrier_prompt_name: str | None
+    harrier_normalize: bool
     harrier_query_instruction: str
     harrier_batch_size: int
 
@@ -141,28 +185,80 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        hf_token = _env("HF_TOKEN")
+
+        harrier_model = _env("HARRIER_MODEL", "microsoft/harrier-oss-v1-0.6b") or "microsoft/harrier-oss-v1-0.6b"
+        harrier_api_url = _env("HARRIER_API_URL") or (
+            f"https://router.huggingface.co/hf-inference/models/{harrier_model}"
+        )
+        harrier_api_key = _provider_key(
+            "HARRIER_API_KEY",
+            api_url=harrier_api_url,
+            hf_token=hf_token,
+            required=True,
+        )
+
+        siglip_api_url = _env("SIGLIP_API_URL", required=True)
+        siglip_api_key = _provider_key(
+            "SIGLIP_API_KEY",
+            api_url=siglip_api_url,
+            hf_token=hf_token,
+            required=True,
+        )
+
+        vlm_api_url = _env("VLM_API_URL", required=True)
+        vlm_api_key = _provider_key(
+            "VLM_API_KEY",
+            api_url=vlm_api_url,
+            hf_token=hf_token,
+            required=True,
+        )
+
+        llm_api_url = _env("LLM_API_URL")
+        if not llm_api_url and hf_token:
+            # Hugging Face Inference Providers expose an OpenAI-compatible chat route.
+            llm_api_url = "https://router.huggingface.co/v1/chat/completions"
+        llm_api_key = _provider_key(
+            "LLM_API_KEY",
+            api_url=llm_api_url,
+            hf_token=hf_token,
+            required=False,
+        )
+
+        image_gen_api_url = _env("IMAGE_GEN_API_URL")
+        image_gen_api_key = _provider_key(
+            "IMAGE_GEN_API_KEY",
+            api_url=image_gen_api_url,
+            hf_token=hf_token,
+            required=False,
+        )
+
         return cls(
+            hf_token=hf_token,
             chroma_api_key=_env("CHROMA_API_KEY", required=True),  # type: ignore[arg-type]
             chroma_tenant=_env("CHROMA_TENANT", required=True),  # type: ignore[arg-type]
             chroma_database=_env("CHROMA_DATABASE", required=True),  # type: ignore[arg-type]
             chroma_collection=_env("CHROMA_COLLECTION", "document_chunks") or "document_chunks",
-            harrier_api_url=_env("HARRIER_API_URL", required=True),  # type: ignore[arg-type]
-            harrier_api_key=_env("HARRIER_API_KEY", required=True),  # type: ignore[arg-type]
+            harrier_api_url=harrier_api_url,
+            harrier_api_key=harrier_api_key or "",
             harrier_api_style=(_env("HARRIER_API_STYLE", "hf") or "hf").lower(),
+            harrier_model=harrier_model,
+            harrier_prompt_name=_env("HARRIER_PROMPT_NAME", "web_search_query"),
+            harrier_normalize=_env_bool("HARRIER_NORMALIZE", True),
             harrier_query_instruction=_env(
                 "HARRIER_QUERY_INSTRUCTION",
-                "Retrieve passages from the supplied documents that answer the user's query:",
-            ) or "Retrieve passages from the supplied documents that answer the user's query:",
+                "Given a web search query, retrieve relevant passages that answer the query",
+            ) or "Given a web search query, retrieve relevant passages that answer the query",
             harrier_batch_size=_env_int("HARRIER_BATCH_SIZE", 64),
             reranker_api_url=_env("RERANKER_API_URL"),
             reranker_api_key=_env("RERANKER_API_KEY"),
             docling_api_url=_env("DOCLING_API_URL", required=True),  # type: ignore[arg-type]
             docling_api_key=_env("DOCLING_API_KEY"),
             docling_timeout_s=_env_float("DOCLING_TIMEOUT_S", 180.0),
-            siglip_api_url=_env("SIGLIP_API_URL", required=True),  # type: ignore[arg-type]
-            siglip_api_key=_env("SIGLIP_API_KEY", required=True),  # type: ignore[arg-type]
-            vlm_api_url=_env("VLM_API_URL", required=True),  # type: ignore[arg-type]
-            vlm_api_key=_env("VLM_API_KEY", required=True),  # type: ignore[arg-type]
+            siglip_api_url=siglip_api_url or "",
+            siglip_api_key=siglip_api_key or "",
+            vlm_api_url=vlm_api_url or "",
+            vlm_api_key=vlm_api_key or "",
             session_store_backend=(_env("SESSION_STORE_BACKEND", "memory") or "memory").lower(),
             session_database_url=_env("SESSION_DATABASE_URL"),
             session_table=_env("SESSION_TABLE", "user_sessions") or "user_sessions",
@@ -181,8 +277,8 @@ class Settings:
             retrieval_use_reranker=_env_bool("RETRIEVAL_USE_RERANKER", True),
             phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),
             phase3_context_max_chars=_env_int("PHASE3_CONTEXT_MAX_CHARS", 60000),
-            llm_api_url=_env("LLM_API_URL"),
-            llm_api_key=_env("LLM_API_KEY"),
+            llm_api_url=llm_api_url,
+            llm_api_key=llm_api_key,
             llm_api_style=(_env("LLM_API_STYLE", "openai") or "openai").lower(),
             llm_model=_env("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
             llm_response_mode=(_env("LLM_RESPONSE_MODE", "json_object") or "json_object").lower(),
@@ -212,8 +308,8 @@ class Settings:
             phase6_fail_fast=_env_bool("PHASE6_FAIL_FAST", False),
             phase6_temperature=_env_float("PHASE6_TEMPERATURE", 0.1),
             phase6_max_tokens=_env_int("PHASE6_MAX_TOKENS", 4096),
-            image_gen_api_url=_env("IMAGE_GEN_API_URL"),
-            image_gen_api_key=_env("IMAGE_GEN_API_KEY"),
+            image_gen_api_url=image_gen_api_url,
+            image_gen_api_key=image_gen_api_key,
             image_gen_api_style=(_env("IMAGE_GEN_API_STYLE", "hf") or "hf").lower(),
             image_gen_model=_env("IMAGE_GEN_MODEL"),
             http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),

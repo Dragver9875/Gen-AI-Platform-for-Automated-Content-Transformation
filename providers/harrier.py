@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from providers.http import APIClient, ProviderError
 
@@ -9,8 +9,13 @@ class HarrierEmbeddingProvider:
     """Hosted Microsoft Harrier embedding adapter.
 
     Supported endpoint contracts:
-      * hf: Hugging Face Sentence-Transformers/feature-extraction style: {"inputs": [...]}
-      * openai: OpenAI-compatible embeddings: {"input": [...], "model": "..."}
+      * hf: Hugging Face feature-extraction / Sentence-Transformers style.
+      * openai: OpenAI-compatible embeddings.
+
+    For Hugging Face serverless inference the recommended defaults are:
+      model: microsoft/harrier-oss-v1-0.6b
+      prompt_name: web_search_query for queries only
+      normalize: true
 
     No model weights are loaded by this repository.
     """
@@ -21,15 +26,21 @@ class HarrierEmbeddingProvider:
         api_key: str,
         *,
         api_style: str = "hf",
+        model: str = "microsoft/harrier-oss-v1-0.6b",
         batch_size: int = 64,
-        query_instruction: str = "Retrieve passages from the supplied documents that answer the user's query:",
+        prompt_name: str | None = "web_search_query",
+        normalize: bool = True,
+        query_instruction: str = "Given a web search query, retrieve relevant passages that answer the query",
         timeout_s: float = 90.0,
         retries: int = 2,
     ):
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
-        self.api_style = api_style
+        self.api_style = api_style.lower()
+        self.model = model
         self.batch_size = batch_size
+        self.prompt_name = prompt_name.strip() if isinstance(prompt_name, str) and prompt_name.strip() else None
+        self.normalize = normalize
         self.query_instruction = query_instruction
         self.http = APIClient(timeout_s=timeout_s, retries=retries, provider_name="harrier")
 
@@ -38,26 +49,46 @@ class HarrierEmbeddingProvider:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed(texts)
+        # Retrieval documents must not receive the query instruction/prompt.
+        return self._embed(texts, prompt_name=None)
 
     def embed_query(self, query: str) -> list[float]:
-        instructed = f"{self.query_instruction}\n\n{query}".strip()
-        return self._embed([instructed])[0]
+        if self.api_style == "hf" and self.prompt_name:
+            # Harrier ships Sentence-Transformers prompts such as web_search_query.
+            return self._embed([query], prompt_name=self.prompt_name)[0]
 
-    def _embed(self, texts: list[str]) -> list[list[float]]:
+        # Fallback for non-HF/OpenAI-compatible embedding services that do not
+        # expose Sentence-Transformers prompt_name semantics.
+        instructed = f"Instruct: {self.query_instruction}\nQuery: {query}".strip()
+        return self._embed([instructed], prompt_name=None)[0]
+
+    def _embed(self, texts: list[str], *, prompt_name: str | None) -> list[list[float]]:
         output: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
             batch = texts[start : start + self.batch_size]
-            payload = self._payload(batch)
+            payload = self._payload(batch, prompt_name=prompt_name)
             response = self.http.request("POST", self.api_url, headers=self.headers, json=payload)
             vectors = self._parse_embeddings(response.json(), expected=len(batch))
             output.extend(vectors)
         return output
 
-    def _payload(self, texts: list[str]) -> dict[str, Any]:
+    def _payload(self, texts: list[str], *, prompt_name: str | None) -> dict[str, Any]:
         if self.api_style == "openai":
-            return {"input": texts}
-        return {"inputs": texts}
+            payload: dict[str, Any] = {"input": texts}
+            if self.model:
+                payload["model"] = self.model
+            return payload
+
+        if self.api_style == "hf":
+            payload = {
+                "inputs": texts,
+                "normalize": self.normalize,
+            }
+            if prompt_name:
+                payload["prompt_name"] = prompt_name
+            return payload
+
+        raise ProviderError(f"Unsupported HARRIER_API_STYLE: {self.api_style}")
 
     @staticmethod
     def _parse_embeddings(data: Any, *, expected: int) -> list[list[float]]:

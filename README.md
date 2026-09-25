@@ -106,8 +106,10 @@ Chroma Cloud
 Implemented:
 
 - hosted `microsoft/harrier-oss-v1-0.6b` embedding adapter
+- Hugging Face serverless Harrier defaults using a single `HF_TOKEN`
 - batched document embeddings
-- query-side Harrier retrieval instruction
+- Harrier `web_search_query` prompt on query embeddings only
+- L2-normalized feature-extraction embeddings
 - Chroma Cloud only
 - non-destructive `upsert`
 - user/session/source metadata isolation
@@ -355,16 +357,47 @@ See [`PHASE9.md`](PHASE9.md) for the focused Phase 9 description.
 
 ---
 
+
+## Hugging Face token setup
+
+A single Hugging Face token can now be reused by Hugging Face-hosted providers. The application only forwards `HF_TOKEN` to URLs owned by Hugging Face (`*.huggingface.co` or `*.huggingface.cloud`), so an accidentally configured third-party URL does not receive the shared token.
+
+```env
+HF_TOKEN=hf_your_token_here
+```
+
+With only this token set, the defaults are:
+
+```text
+Harrier -> HF serverless feature-extraction endpoint
+Qwen    -> https://router.huggingface.co/v1/chat/completions
+```
+
+Provider-specific keys remain supported and take precedence. For example, `HARRIER_API_KEY` overrides `HF_TOKEN` for Harrier. SigLIP, VLM, and creative-image providers also reuse `HF_TOKEN` automatically **only when their configured URL is a Hugging Face-owned endpoint**. Docling and Chroma continue to use their own credentials.
+
+> Hugging Face serverless/provider availability and free credits are account/model dependent. For production, the same code can point at a dedicated HF Inference Endpoint by setting the provider URL explicitly.
+
 # Provider/API contracts
 
 ## Harrier
 
-Supported payload styles:
+The default Harrier configuration uses Hugging Face serverless feature extraction:
 
 ```text
-HARRIER_API_STYLE=hf      -> {"inputs": ["..."]}
-HARRIER_API_STYLE=openai  -> {"input": ["..."]}
+model: microsoft/harrier-oss-v1-0.6b
+endpoint: https://router.huggingface.co/hf-inference/models/microsoft/harrier-oss-v1-0.6b
+auth: HF_TOKEN
+query prompt: web_search_query
+normalize: true
 ```
+
+You therefore do **not** need a separate Microsoft or Harrier API key. Set one Hugging Face token:
+
+```env
+HF_TOKEN=hf_...
+```
+
+`HARRIER_API_URL` and `HARRIER_API_KEY` are optional overrides for a dedicated endpoint. The adapter also supports OpenAI-compatible embedding endpoints when `HARRIER_API_STYLE=openai`.
 
 ## Docling
 
@@ -414,7 +447,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure the provider endpoints/credentials in the deployment environment.
+Configure `HF_TOKEN`, Chroma, Docling, and any non-default vision endpoints in the deployment environment. See `.env.example`.
 
 The application never requires local Harrier, Qwen, SigLIP, VLM or image-generation weights.
 
