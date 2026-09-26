@@ -45,3 +45,10 @@ The Phase 3/4/5 modules and graph helpers remain because the Phase 6 graph impor
 ## Windows launcher hardening
 
 `deploy_locally.ps1` now selects Python in this order: active virtual environment, `python`/`python3` on PATH, then the Windows `py` launcher. Missing `py -3.11` or `py -3.12` registrations are treated as ordinary probe failures and can no longer terminate the deployment script under `$ErrorActionPreference = "Stop"`.
+
+## Additional routing hardening
+
+- Stale placeholder HF endpoint URLs are now ignored instead of being called literally.
+- A deterministic document-page precheck runs before SigLIP for standalone images.
+- PDF-page photos/screenshots route as `image-document:document page`; natural images route as `image-visual:<label>`.
+- The precheck performs no OCR and loads no ML weights; it only biases routing.

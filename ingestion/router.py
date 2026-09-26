@@ -11,6 +11,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.schemas import IngestionResult, SourceElement
 from ingestion.normalizer import normalize_text
+from ingestion.image_heuristics import assess_document_image
 from ingestion.preflight import PdfPreflight
 from ingestion.registry import IngestionProcessorRegistry
 from providers.siglip import SigLIPRoutingProvider
@@ -357,25 +358,52 @@ class IngestionRouter:
 
     def _ingest_image(self, path: Path, source_id: str, media_type: str) -> IngestionResult:
         warnings: list[str] = []
-        routing_source = "siglip"
-        try:
-            predictions = self.siglip.classify(path)
-        except Exception as exc:
-            warnings.append(f"SigLIP routing unavailable; used VLM fallback: {exc}")
-            predictions = self.vlm.classify_file(path, list(DEFAULT_VISUAL_LABELS))
-            routing_source = "vlm_fallback"
+
+        # A screenshot/photo of a PDF page arrives with an image extension, but
+        # semantically it is still a document. Run a cheap local precheck before
+        # asking SigLIP so obvious page scans are not pushed down the generic
+        # photograph path. No OCR/model weights are used in this precheck.
+        assessment = assess_document_image(path)
+        if assessment.is_document_like:
+            predictions = [{"label": "document page", "score": assessment.score}]
+            routing_source = "document_precheck"
+        else:
+            routing_source = "siglip"
+            try:
+                predictions = self.siglip.classify(path)
+            except Exception as exc:
+                warnings.append(f"SigLIP routing unavailable; used VLM fallback: {exc}")
+                predictions = self.vlm.classify_file(path, list(DEFAULT_VISUAL_LABELS))
+                routing_source = "vlm_fallback"
 
         top_label = str(predictions[0]["label"]).lower() if predictions else "other visual"
+
+        # If SigLIP is uncertain and a document label is close to the winning
+        # score, bias toward document extraction. Missing a document page is much
+        # more damaging than giving a natural image a transcription-style prompt.
+        if top_label not in self.document_like_image_labels and predictions:
+            top_score = float(predictions[0].get("score", 0.0))
+            document_prediction = next(
+                (p for p in predictions if str(p.get("label", "")).lower() in self.document_like_image_labels),
+                None,
+            )
+            if document_prediction is not None:
+                document_score = float(document_prediction.get("score", 0.0))
+                if document_score >= 0.15 and document_score >= top_score * 0.85:
+                    top_label = str(document_prediction["label"]).lower()
+                    routing_source = f"{routing_source}+document_margin"
+
         if top_label in self.document_like_image_labels:
             prompt = (
-                "Transcribe and describe this document-like image faithfully for retrieval. Preserve headings, "
-                "paragraphs, lists, tables, labels, numbers and reading order. Do not summarize or invent content."
+                "This image is a document page or screenshot. Transcribe it faithfully for retrieval. "
+                "Preserve headings, paragraphs, lists, tables, labels, numbers, equations and reading order. "
+                "Describe charts/figures only when they carry information. Do not summarize or invent content."
             )
-            strategy = f"image-vlm-document:{top_label}"
+            strategy = f"image-document:{top_label}"
             kind = "document_image"
         else:
             prompt = None
-            strategy = f"image-vlm:{top_label}"
+            strategy = f"image-visual:{top_label}"
             kind = "visual_description"
 
         description = normalize_text(self.vlm.describe_file(path, prompt=prompt))
@@ -391,6 +419,11 @@ class IngestionRouter:
             provider_metadata={
                 "visual_routing": predictions,
                 "routing_source": routing_source,
+                "document_precheck": {
+                    "is_document_like": assessment.is_document_like,
+                    "score": assessment.score,
+                    "reasons": list(assessment.reasons),
+                },
                 "vlm_model_used": getattr(self.vlm, "last_model_used", None),
             },
         )

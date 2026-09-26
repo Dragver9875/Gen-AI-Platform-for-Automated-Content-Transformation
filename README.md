@@ -419,6 +419,14 @@ No reranker key is needed; the endpoint uses `HF_TOKEN`. If `RERANKER_API_URL` i
 
 ## Document parsing and visual fallback
 
+Document-page image precheck
+----------------------------
+Standalone PNG/JPEG/TIFF inputs first pass through a deterministic document-page heuristic (filename hints, page-like aspect ratio, luminance distribution and edge density) before SigLIP. This prevents photographs/screenshots of PDF pages from being misrouted as generic photos. Document-like images use a transcription-oriented VLM prompt; natural images use the generic visual-description prompt.
+
+Endpoint hygiene
+----------------
+Template values such as `https://your-vlm-endpoint.endpoints.huggingface.cloud` are treated as unset. When `VLM_API_URL` is blank or still contains that placeholder, the runtime resolves to `https://router.huggingface.co/v1/chat/completions` and authenticates with `HF_TOKEN`.
+
 The default runtime deliberately does **not** depend on Granite Docling serverless inference. Native documents are parsed deterministically first:
 
 ```text

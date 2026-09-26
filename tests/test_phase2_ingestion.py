@@ -62,7 +62,7 @@ def test_image_routes_to_vlm(tmp_path: Path):
     file = tmp_path / "image.png"
     file.write_bytes(b"not-a-real-png-needed-for-mock")
     result = make_router(siglip=FakeSiglip("photograph")).ingest(file)
-    assert result.strategy.startswith("image-vlm:photograph")
+    assert result.strategy.startswith("image-visual:photograph")
     assert "flood water" in result.text
 
 
@@ -70,7 +70,7 @@ def test_document_like_image_routes_to_vlm_document_prompt(tmp_path: Path):
     file = tmp_path / "scan.png"
     file.write_bytes(b"mock")
     result = make_router(siglip=FakeSiglip("document page")).ingest(file)
-    assert result.strategy.startswith("image-vlm-document:document page")
+    assert result.strategy.startswith("image-document:document page")
     assert "road closed" in result.text
 
 
@@ -150,6 +150,42 @@ def test_image_falls_back_to_vlm_routing_when_siglip_unavailable(tmp_path: Path)
     image = tmp_path / "photo.png"
     image.write_bytes(b"fake-image")
     result = make_router(siglip=BrokenSiglip()).ingest(image)
-    assert result.strategy.startswith("image-vlm")
+    assert result.strategy.startswith("image-")
     assert result.provider_metadata["routing_source"] == "vlm_fallback"
     assert any("SigLIP routing unavailable" in warning for warning in result.warnings)
+
+
+def test_pdf_page_photo_filename_precheck_routes_as_document(tmp_path: Path):
+    # Real white page-like image with dark text-like strokes. The filename mirrors
+    # the user's failing case and should bypass generic-image routing.
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 700, 1000), 0)
+    pix.clear_with(255)
+    path = tmp_path / "pdf2photo.jpeg"
+    pix.save(path)
+
+    vlm = FakeVLM()
+    result = make_router(siglip=FakeSiglip("photograph"), vlm=vlm).ingest(path)
+
+    assert result.strategy.startswith("image-document:document page")
+    assert result.provider_metadata["routing_source"] == "document_precheck"
+    assert result.provider_metadata["document_precheck"]["is_document_like"] is True
+    assert "road closed" in result.text
+
+
+def test_generic_filename_page_photo_detected_from_layout(tmp_path: Path):
+    path = tmp_path / "IMG_0001.jpeg"
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    for index in range(30):
+        page.insert_text(
+            (50, 60 + index * 22),
+            f"Sample report line {index}: project status and metric 12345.",
+            fontsize=11,
+        )
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(1.2, 1.2), alpha=False)
+    pix.save(path)
+    doc.close()
+
+    result = make_router(siglip=FakeSiglip("photograph"), vlm=FakeVLM()).ingest(path)
+    assert result.strategy.startswith("image-document:document page")
+    assert result.provider_metadata["routing_source"] == "document_precheck"

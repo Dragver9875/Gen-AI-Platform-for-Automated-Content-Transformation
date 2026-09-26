@@ -44,6 +44,34 @@ def _is_huggingface_url(url: str | None) -> bool:
     )
 
 
+
+
+def _clean_endpoint(value: str | None) -> str | None:
+    """Treat common template/example endpoint values as unset.
+
+    Older repository revisions shipped examples such as
+    ``https://your-vlm-endpoint.endpoints.huggingface.cloud``. Calling those
+    values literally produces a confusing provider 404 instead of falling back
+    to the shared HF router.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    host = (urlparse(value).hostname or "").lower()
+    lower = value.lower()
+    if (
+        host.startswith(("your-", "example-", "placeholder-"))
+        or host in {"example.com", "www.example.com"}
+        or "your-vlm-endpoint" in lower
+        or "your-endpoint" in lower
+        or "replace-me" in lower
+        or "changeme" in lower
+    ):
+        return None
+    return value
+
 def _provider_key(
     env_name: str,
     *,
@@ -189,7 +217,7 @@ class Settings:
         hf_token = _env("HF_TOKEN")
 
         harrier_model = _env("HARRIER_MODEL", "microsoft/harrier-oss-v1-0.6b") or "microsoft/harrier-oss-v1-0.6b"
-        harrier_api_url = _env("HARRIER_API_URL") or (
+        harrier_api_url = _clean_endpoint(_env("HARRIER_API_URL")) or (
             f"https://router.huggingface.co/hf-inference/models/{harrier_model}"
         )
         harrier_api_key = _provider_key(
@@ -203,7 +231,7 @@ class Settings:
         # Native PDF/PPTX parsing is deterministic and does not require a document-model endpoint.
 
         siglip_model = _env("SIGLIP_MODEL", "google/siglip-so400m-patch14-384") or "google/siglip-so400m-patch14-384"
-        siglip_api_url = _env("SIGLIP_API_URL")
+        siglip_api_url = _clean_endpoint(_env("SIGLIP_API_URL"))
         if siglip_api_url:
             siglip_api_key = _provider_key(
                 "SIGLIP_API_KEY",
@@ -224,7 +252,7 @@ class Settings:
             for x in (_env("VLM_FALLBACK_MODELS", "zai-org/GLM-4.5V") or "").split(",")
             if x.strip() and x.strip() != vlm_model
         )
-        vlm_api_url = _env("VLM_API_URL") or "https://router.huggingface.co/v1/chat/completions"
+        vlm_api_url = _clean_endpoint(_env("VLM_API_URL")) or "https://router.huggingface.co/v1/chat/completions"
         vlm_api_key = _provider_key(
             "VLM_API_KEY",
             api_url=vlm_api_url,
@@ -233,7 +261,7 @@ class Settings:
         )
         vlm_api_style = (_env("VLM_API_STYLE", "openai") or "openai").lower()
 
-        llm_api_url = _env("LLM_API_URL")
+        llm_api_url = _clean_endpoint(_env("LLM_API_URL"))
         if not llm_api_url and hf_token:
             # Hugging Face Inference Providers expose an OpenAI-compatible chat route.
             llm_api_url = "https://router.huggingface.co/v1/chat/completions"
@@ -256,7 +284,7 @@ class Settings:
             required=False,
         )
 
-        reranker_api_url = _env("RERANKER_API_URL")
+        reranker_api_url = _clean_endpoint(_env("RERANKER_API_URL"))
         reranker_api_key = _provider_key(
             "RERANKER_API_KEY",
             api_url=reranker_api_url,
@@ -264,7 +292,7 @@ class Settings:
             required=False,
         )
 
-        verifier_api_url = _env("VERIFIER_API_URL")
+        verifier_api_url = _clean_endpoint(_env("VERIFIER_API_URL"))
         verifier_api_key = _provider_key(
             "VERIFIER_API_KEY",
             api_url=verifier_api_url,
@@ -272,7 +300,7 @@ class Settings:
             required=False,
         )
 
-        image_gen_api_url = _env("IMAGE_GEN_API_URL")
+        image_gen_api_url = _clean_endpoint(_env("IMAGE_GEN_API_URL"))
         image_gen_api_key = _provider_key(
             "IMAGE_GEN_API_KEY",
             api_url=image_gen_api_url,

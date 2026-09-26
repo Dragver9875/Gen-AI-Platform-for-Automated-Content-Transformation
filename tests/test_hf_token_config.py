@@ -108,3 +108,13 @@ def test_harrier_hf_payload_uses_query_prompt_and_no_document_prompt():
         "inputs": ["document text"],
         "normalize": True,
     }
+
+
+def test_placeholder_vlm_endpoint_is_ignored_and_hf_router_is_used(monkeypatch):
+    values = dict(BASE_ENV)
+    values["VLM_API_URL"] = "https://your-vlm-endpoint.endpoints.huggingface.cloud"
+    _set_env(monkeypatch, values)
+    settings = Settings.from_env()
+
+    assert settings.vlm_api_url == "https://router.huggingface.co/v1/chat/completions"
+    assert settings.vlm_api_key == "hf_test_token"
