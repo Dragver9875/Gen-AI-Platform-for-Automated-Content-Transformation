@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -9,36 +10,55 @@ class ConfigurationError(RuntimeError):
     pass
 
 
+def _secret_file_value(name: str) -> str | None:
+    """Read a Render Secret File when the equivalent environment variable is absent."""
+    secret_dir = Path(os.getenv("RENDER_SECRET_DIR", "/etc/secrets"))
+    path = secret_dir / name
+    try:
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+            return value or None
+    except (OSError, UnicodeError):
+        pass
+    return None
+
+
 def _env(name: str, default: str | None = None, *, required: bool = False) -> str | None:
-    value = os.getenv(name, default)
+    raw = os.getenv(name)
+    value = raw.strip() if raw is not None and raw.strip() else _secret_file_value(name)
+    if value is None:
+        value = default
     if required and not value:
-        raise ConfigurationError(f"Missing required environment variable: {name}")
+        raise ConfigurationError(
+            f"Missing required configuration: {name}. "
+            f"Set it as an environment variable or Render Secret File /etc/secrets/{name}."
+        )
     return value
 
 
 def _first_env(*names: str) -> str | None:
-    """Return the first non-empty environment value from a list of aliases."""
+    """Return the first non-empty value from environment variables or Render Secret Files."""
     for name in names:
-        value = os.getenv(name)
-        if value is not None and value.strip():
-            return value.strip()
+        value = _env(name)
+        if value:
+            return value
     return None
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
+    value = _env(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
+    value = _env(name)
     return int(value) if value else default
 
 
 def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
+    value = _env(name)
     return float(value) if value else default
 
 

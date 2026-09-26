@@ -18,7 +18,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import Settings
+from app.config import Settings, _env
 from app.factory import build_phase6
 from core.telemetry import telemetry_session
 
@@ -68,7 +68,7 @@ def _user_id(client_id: str | None) -> str:
 
 
 def _present(*names: str) -> bool:
-    return any(bool((os.getenv(name) or "").strip()) for name in names)
+    return any(bool((_env(name) or "").strip()) for name in names)
 
 
 def _credential_status() -> dict[str, bool]:
