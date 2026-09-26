@@ -1,26 +1,15 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
-from ingestion.chunker import StructureAwareChunker
-from ingestion.router import IngestionRouter
+import pymupdf
+from pptx import Presentation
+
 from app.schemas import IngestionResult, SourceElement
-
-
-class FakeDocling:
-    def convert_file(self, path, **kwargs):
-        return {
-            "status": "success",
-            "document": {
-                "md_content": "# Heading\n\nParsed document text.",
-                "json_content": {},
-            },
-        }
-
-    @staticmethod
-    def document_payload(result):
-        doc = result["document"]
-        return doc["md_content"], doc["json_content"]
+from ingestion.chunker import StructureAwareChunker
+from ingestion.preflight import PdfPreflight
+from ingestion.router import IngestionRouter
 
 
 class FakeSiglip:
@@ -32,34 +21,36 @@ class FakeSiglip:
 
 
 class FakeVLM:
+    def __init__(self):
+        self.byte_calls = 0
+        self.file_calls = 0
+
     def describe_file(self, path, prompt=None):
+        self.file_calls += 1
+        if prompt and "Transcribe" in prompt:
+            return "Incident advisory: road closed until 18:00."
         return "A rescue vehicle beside flood water."
 
-    def describe_bytes(self, data, prompt=None):
+    def describe_bytes(self, data, prompt=None, *, media_type=None):
+        self.byte_calls += 1
         return "Scanned page containing an incident advisory."
 
+    def classify_file(self, path, labels):
+        return [{"label": "photograph", "score": 1.0}]
 
-class FakePdfPreflight:
-    class Profile:
-        strategy = "native-text"
-        visual_or_scanned_pages = []
-        pages = []
 
-    def inspect(self, path):
-        return self.Profile()
-
-    @staticmethod
-    def render_page_png(path, page_number):
-        return b"png"
+def make_router(*, siglip=None, vlm=None):
+    return IngestionRouter(
+        siglip=siglip or FakeSiglip(),
+        vlm=vlm or FakeVLM(),
+        pdf_preflight=PdfPreflight(native_text_chars=40, image_coverage_threshold=0.7),
+    )
 
 
 def test_text_ingestion_and_chunking(tmp_path: Path):
     file = tmp_path / "source.txt"
     file.write_text("Alpha beta gamma", encoding="utf-8")
-    router = IngestionRouter(
-        docling=FakeDocling(), siglip=FakeSiglip(), vlm=FakeVLM(), pdf_preflight=FakePdfPreflight()
-    )
-    result = router.ingest(file)
+    result = make_router().ingest(file)
     assert result.strategy == "text-direct"
     chunks = StructureAwareChunker(target_chars=100, overlap_chars=0).chunk(result, user_id="u1", session_id="s1")
     assert len(chunks) == 1
@@ -70,36 +61,25 @@ def test_text_ingestion_and_chunking(tmp_path: Path):
 def test_image_routes_to_vlm(tmp_path: Path):
     file = tmp_path / "image.png"
     file.write_bytes(b"not-a-real-png-needed-for-mock")
-    router = IngestionRouter(
-        docling=FakeDocling(), siglip=FakeSiglip("photograph"), vlm=FakeVLM(), pdf_preflight=FakePdfPreflight()
-    )
-    result = router.ingest(file)
-    assert result.strategy.startswith("image-vlm")
+    result = make_router(siglip=FakeSiglip("photograph")).ingest(file)
+    assert result.strategy.startswith("image-vlm:photograph")
     assert "flood water" in result.text
 
 
-def test_document_like_image_routes_to_docling(tmp_path: Path):
+def test_document_like_image_routes_to_vlm_document_prompt(tmp_path: Path):
     file = tmp_path / "scan.png"
     file.write_bytes(b"mock")
-    router = IngestionRouter(
-        docling=FakeDocling(), siglip=FakeSiglip("document page"), vlm=FakeVLM(), pdf_preflight=FakePdfPreflight()
-    )
-    result = router.ingest(file)
-    assert result.strategy.startswith("image-docling")
-    assert "Parsed document text" in result.text
+    result = make_router(siglip=FakeSiglip("document page")).ingest(file)
+    assert result.strategy.startswith("image-vlm-document:document page")
+    assert "road closed" in result.text
 
 
 def test_pdf_preflight_detects_full_page_image(tmp_path: Path):
-    import base64
-    import fitz
-    from ingestion.preflight import PdfPreflight
-
-    # 1x1 PNG inserted over the full page; enough to exercise image coverage routing.
     png = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
     pdf_path = tmp_path / "scan.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page(width=600, height=800)
     page.insert_image(page.rect, stream=png)
     doc.save(pdf_path)
@@ -110,21 +90,66 @@ def test_pdf_preflight_detects_full_page_image(tmp_path: Path):
     assert profile.pages[0].kind == "scanned"
 
 
+def test_native_pdf_uses_local_text_without_vlm(tmp_path: Path):
+    pdf_path = tmp_path / "native.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "This is a native PDF paragraph with enough searchable text to exceed the threshold and remain local.")
+    doc.save(pdf_path)
+    doc.close()
+
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(pdf_path)
+    assert result.strategy == "pdf-native-text"
+    assert "native PDF paragraph" in result.text
+    assert vlm.byte_calls == 0
+    assert result.provider_metadata["document_parser"] == "pymupdf+vlm"
+    assert result.provider_metadata["vlm_pages"] == 0
+
+
+def test_scanned_pdf_uses_vlm_page_analysis(tmp_path: Path):
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    pdf_path = tmp_path / "scan.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=800)
+    page.insert_image(page.rect, stream=png)
+    doc.save(pdf_path)
+    doc.close()
+
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(pdf_path)
+    assert result.strategy == "pdf-image-only/scanned"
+    assert "incident advisory" in result.text
+    assert vlm.byte_calls == 1
+    assert result.provider_metadata["vlm_pages"] == 1
+
+
+def test_pptx_extracts_text_locally(tmp_path: Path):
+    path = tmp_path / "deck.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[1])
+    slide.shapes.title.text = "Quarterly Update"
+    slide.placeholders[1].text = "Project finished today."
+    prs.save(path)
+
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(path)
+    assert result.strategy == "pptx-native+visual"
+    assert "Quarterly Update" in result.text
+    assert "Project finished today." in result.text
+    assert vlm.byte_calls == 0
+
+
 def test_image_falls_back_to_vlm_routing_when_siglip_unavailable(tmp_path: Path):
     class BrokenSiglip:
         def classify(self, path):
             raise RuntimeError("provider unavailable")
 
-    class RoutingVLM(FakeVLM):
-        def classify_file(self, path, labels):
-            return [{"label": "photograph", "score": 1.0}]
-
     image = tmp_path / "photo.png"
     image.write_bytes(b"fake-image")
-    router = IngestionRouter(
-        docling=FakeDocling(), siglip=BrokenSiglip(), vlm=RoutingVLM(), pdf_preflight=FakePdfPreflight()
-    )
-    result = router.ingest(image)
+    result = make_router(siglip=BrokenSiglip()).ingest(image)
     assert result.strategy.startswith("image-vlm")
     assert result.provider_metadata["routing_source"] == "vlm_fallback"
     assert any("SigLIP routing unavailable" in warning for warning in result.warnings)

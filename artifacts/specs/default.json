@@ -1,0 +1,9 @@
+{
+  "artifacts": [
+    {"name": "text", "generator": "text", "aliases": ["txt", "markdown", "md"], "media_type": "text/plain", "extension": ".txt"},
+    {"name": "pdf", "generator": "pdf", "aliases": [], "media_type": "application/pdf", "extension": ".pdf"},
+    {"name": "pptx", "generator": "pptx", "aliases": ["ppt", "presentation"], "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "extension": ".pptx"},
+    {"name": "svg", "generator": "svg", "aliases": ["infographic", "factual_image"], "media_type": "image/svg+xml", "extension": ".svg"},
+    {"name": "image", "generator": "creative_image", "aliases": ["creative_image", "png"], "media_type": "image/png", "extension": ".png"}
+  ]
+}

@@ -3,7 +3,8 @@ param(
     [switch]$ForceRecreateVenv,
     [switch]$SkipTypst,
     [switch]$SkipTests,
-    [switch]$UseMemorySessions
+    [switch]$UseMemorySessions,
+    [switch]$UsePostgresSessions
 )
 
 Set-StrictMode -Version Latest
@@ -96,6 +97,10 @@ if (-not $RepoRoot) {
 }
 Set-Location -LiteralPath $RepoRoot
 
+if ($UseMemorySessions -and $UsePostgresSessions) {
+    throw "Choose only one of -UseMemorySessions or -UsePostgresSessions."
+}
+
 Write-Host "TheName - Windows setup" -ForegroundColor White
 Write-Host "Repository: $RepoRoot"
 
@@ -162,8 +167,19 @@ if ($UseMemorySessions) {
     Set-DotEnvValue -Path $EnvPath -Name "SESSION_STORE_BACKEND" -Value "memory"
     Write-Warn "SESSION_STORE_BACKEND was set to memory. This is suitable for local development only."
 }
+if ($UsePostgresSessions) {
+    Set-DotEnvValue -Path $EnvPath -Name "SESSION_STORE_BACKEND" -Value "postgres"
+}
 
-$ArtifactsDir = Join-Path $RepoRoot "artifacts"
+$sessionBackendLine = Select-String -Path $EnvPath -Pattern '^SESSION_STORE_BACKEND=(.+)$' | Select-Object -First 1
+$sessionBackend = if ($sessionBackendLine) { $sessionBackendLine.Matches[0].Groups[1].Value.Trim().ToLowerInvariant() } else { "memory" }
+if ($sessionBackend -eq "postgres") {
+    Write-Step "Installing optional PostgreSQL persistence dependencies"
+    & $VenvPython -m pip install -r requirements-postgres.txt
+    if ($LASTEXITCODE -ne 0) { throw "PostgreSQL dependency installation failed." }
+}
+
+$ArtifactsDir = Join-Path $RepoRoot "runtime_artifacts"
 if (-not (Test-Path $ArtifactsDir)) {
     New-Item -ItemType Directory -Path $ArtifactsDir | Out-Null
 }
@@ -201,6 +217,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not $SkipTests) {
+    Write-Step "Installing test dependency"
+    & $VenvPython -m pip install "pytest>=8,<9"
+    if ($LASTEXITCODE -ne 0) { throw "pytest installation failed." }
     Write-Step "Running test suite"
     & $VenvPython -m pytest -q
     if ($LASTEXITCODE -ne 0) {

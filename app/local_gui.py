@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -20,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_ROOT = ROOT / ".local_gui_uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 load_dotenv(ROOT / ".env", override=False)
+
+MAX_TOTAL_UPLOAD_BYTES = int(os.getenv("LOCAL_GUI_MAX_TOTAL_UPLOAD_MB", "100")) * 1024 * 1024
 
 SUPPORTED_UPLOAD_SUFFIXES = {
     ".txt", ".md", ".pdf", ".pptx",
@@ -39,6 +42,13 @@ def _save_uploads(uploaded_files: list[Any], source_text: str, run_id: str) -> l
     run_dir.mkdir(parents=True, exist_ok=True)
     paths: list[str] = []
     used: set[str] = set()
+
+    total_bytes = sum(len(item.getvalue()) for item in uploaded_files) + len(source_text.encode("utf-8"))
+    if total_bytes > MAX_TOTAL_UPLOAD_BYTES:
+        raise ValueError(
+            f"Input payload is {total_bytes / (1024 * 1024):.1f} MiB; "
+            f"local GUI limit is {MAX_TOTAL_UPLOAD_BYTES / (1024 * 1024):.0f} MiB."
+        )
 
     for item in uploaded_files:
         name = _safe_name(item.name)
@@ -80,9 +90,9 @@ def _clean_state_for_debug(state: dict[str, Any]) -> dict[str, Any]:
 def _settings_summary(settings: Settings) -> list[dict[str, str]]:
     return [
         {"Capability": "Embeddings", "Provider / model": f"HF · {settings.harrier_model}", "Configured": "yes"},
-        {"Capability": "Document understanding", "Provider / model": f"HF · {settings.docling_model}", "Configured": "yes"},
+        {"Capability": "Document parsing", "Provider / model": "PyMuPDF + python-pptx", "Configured": "yes"},
         {"Capability": "Visual routing", "Provider / model": f"HF · {settings.siglip_model}", "Configured": "yes"},
-        {"Capability": "Visual understanding", "Provider / model": f"HF · {settings.vlm_model}", "Configured": "yes"},
+        {"Capability": "Visual understanding", "Provider / model": f"HF · {settings.vlm_model} (fallbacks: {', '.join(settings.vlm_fallback_models) or 'none'})", "Configured": "yes"},
         {"Capability": "Generation / verifier", "Provider / model": f"HF · {settings.llm_model}", "Configured": "yes" if settings.llm_api_url else "no"},
         {"Capability": "Reranker", "Provider / model": settings.reranker_model, "Configured": "yes" if settings.reranker_api_url else "no (RRF only)"},
         {"Capability": "Creative image", "Provider / model": settings.image_gen_model or "—", "Configured": "yes" if settings.image_gen_api_url else "no"},
@@ -163,7 +173,7 @@ with right:
         value="Create a concise professional summary of the uploaded source material.",
     )
     custom_instructions = st.text_area("Optional additional instructions", height=90)
-    st.caption("The uploaded files are passed as actual source_paths to Phase 6; this GUI does not use app/server.py's fallback generator.")
+    st.caption("Uploaded bytes are materialized as real source_paths and passed directly to the Phase 6 orchestrator.")
 
 run = st.button("Run real multimodal pipeline", type="primary", use_container_width=True)
 
@@ -180,6 +190,7 @@ if run:
 
     run_id = uuid.uuid4().hex
     source_paths = _save_uploads(list(uploads or []), source_text, run_id)
+    run_upload_dir = UPLOAD_ROOT / run_id
 
     with st.status("Running Phase 6 multimodal pipeline…", expanded=True) as status_box:
         try:
@@ -220,6 +231,8 @@ if run:
             status_box.update(label="Pipeline crashed before returning state", state="error")
             st.exception(exc)
             st.stop()
+        finally:
+            shutil.rmtree(run_upload_dir, ignore_errors=True)
 
 state = st.session_state.get("last_run_state")
 perf = st.session_state.get("last_run_perf")
@@ -246,7 +259,7 @@ if state and perf:
     with tab_ingest:
         if ingested:
             st.dataframe(ingested, hide_index=True, use_container_width=True)
-            st.caption("Check `strategy` to confirm whether an image used VLM vs Docling and whether a PDF was classified native/scanned/mixed.")
+            st.caption("Check `strategy` to confirm image VLM routing and whether a PDF was classified native/scanned/mixed. Native PDFs should report PyMuPDF parsing with zero VLM page calls.")
         else:
             st.warning("No ingested source metadata was returned.")
         if state.get("retrieval_mode"):

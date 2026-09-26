@@ -10,7 +10,10 @@
   "harrier": {
     "per_request": 0.0
   },
-  "docling": {
+  "vlm": {
+    "per_request": 0.0
+  },
+  "siglip": {
     "per_request": 0.0
   }
 }

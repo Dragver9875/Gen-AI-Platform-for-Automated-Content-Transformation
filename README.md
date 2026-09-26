@@ -37,14 +37,15 @@ Phase 9 has intentionally been implemented before the deployment layer so retrie
 USER / CLIENT
      |
      v
-TEXT / PDF / PPT / PPTX / IMAGE
+TEXT / PDF / PPTX / IMAGE
      |
      v
 Adaptive ingestion router
      |
-     +--> Granite Docling HF -- document/OCR/layout
+     +--> PyMuPDF ------------ native PDF text/layout
+     +--> python-pptx -------- PPTX text/tables/chart data
      +--> SigLIP API -------- visual routing
-     +--> VLM API ----------- visual understanding
+     +--> HF VLM ------------ scanned pages / images / slide pictures
      |
      v
 Unified Source Representation
@@ -130,7 +131,7 @@ Supported inputs:
 
 PDF pages are preflight-classified as native-text, scanned/image-only, mixed, or visual-heavy. Image-only PDFs therefore follow OCR/visual-understanding routes instead of failing as text PDFs.
 
-Standalone images are routed through SigLIP; document-like images go to the Hugging Face Granite Docling adapter and general visuals go to the VLM endpoint. PDF pages are rendered locally and sent as images to `ibm-granite/granite-docling-258M` through a Hugging Face-compatible multimodal endpoint. PPTX text/tables are extracted deterministically with `python-pptx`; legacy `.ppt` should be converted to `.pptx` before upload.
+Standalone images are routed through SigLIP and understood by the hosted VLM. Native PDF text is extracted locally with PyMuPDF, so ordinary searchable PDFs require no document-VLM call. Only scanned/visual/mixed PDF pages are rendered and sent selectively to the VLM. PPTX text, tables, and available chart data are extracted deterministically with `python-pptx`; embedded slide pictures are described by the VLM. Legacy `.ppt` is intentionally unsupported and should be converted to `.pptx` before upload.
 
 # Phase 3 — LangGraph orchestration and user sessions
 
@@ -366,7 +367,7 @@ The ML layer now uses one shared Hugging Face credential. `HF_TOKEN` is only for
 HF_TOKEN=hf_your_token_here
 ```
 
-The same token can authenticate Harrier, Granite Docling, Qwen generation/verification, Hugging Face SigLIP/VLM endpoints, the optional HF reranker endpoint, and FLUX/image-generation providers.
+The same token can authenticate Harrier, Qwen generation/verification, Hugging Face SigLIP/VLM endpoints, the optional HF reranker endpoint, and FLUX/image-generation providers.
 
 The only independent service credentials required by the prototype are:
 
@@ -416,28 +417,26 @@ RETRIEVAL_USE_RERANKER=true
 
 No reranker key is needed; the endpoint uses `HF_TOKEN`. If `RERANKER_API_URL` is omitted, the service falls back to RRF without failing.
 
-## Granite Docling on Hugging Face
+## Document parsing and visual fallback
 
-Document understanding no longer requires a separate Docling Serve credential. The default model is `ibm-granite/granite-docling-258M` (Apache-2.0), consumed through a Hugging Face-compatible multimodal/chat endpoint with `HF_TOKEN`. The model is designed for document-page conversion and its official instruction is `Convert this page to docling.`
-
-The HF-only ingestion adapter works as follows:
+The default runtime deliberately does **not** depend on Granite Docling serverless inference. Native documents are parsed deterministically first:
 
 ```text
-PDF  -> PyMuPDF renders pages -> Granite Docling HF endpoint
-Image -> Granite Docling HF endpoint
-PPTX -> deterministic python-pptx text/table extraction
-PPT   -> convert to PPTX before upload
+Native PDF -> PyMuPDF text extraction
+Scanned/visual PDF pages -> page render -> HF VLM
+PPTX -> python-pptx text/table/chart extraction
+PPTX embedded pictures -> HF VLM
+Image -> SigLIP route -> HF VLM
 ```
 
-Default configuration:
+This avoids sending ordinary text PDFs through a vision model and removes a hard dependency on a Hub checkpoint being deployed by an Inference Provider. The VLM defaults to `Qwen/Qwen2.5-VL-3B-Instruct`; `VLM_FALLBACK_MODELS` can specify ordered alternatives for explicit model/provider availability errors.
 
 ```env
-DOCLING_MODEL=ibm-granite/granite-docling-258M
-DOCLING_API_URL=
-DOCLING_RENDER_DPI=144
+VLM_MODEL=Qwen/Qwen2.5-VL-3B-Instruct
+VLM_FALLBACK_MODELS=zai-org/GLM-4.5V
+VLM_API_URL=
+VLM_API_STYLE=openai
 ```
-
-If `DOCLING_API_URL` is blank, the application uses the Hugging Face OpenAI-compatible router. If that model is not available from a serverless provider in your account/region, deploy the same model as a Hugging Face Inference Endpoint and set `DOCLING_API_URL` to that endpoint; authentication still uses the same `HF_TOKEN`. Hugging Face supports image-text-to-text through its unified inference API and chat-compatible multimodal requests.
 
 ## SigLIP
 
@@ -499,7 +498,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure `HF_TOKEN`, Chroma Cloud, and (for persistent sessions) the session database. SigLIP, the VLM, Harrier, Granite Docling, Qwen, and verification all have Hugging Face defaults; dedicated endpoint URLs are optional overrides. See `.env.example`.
+Configure `HF_TOKEN`, Chroma Cloud, and (for persistent sessions) the session database. SigLIP, the VLM, Harrier, Qwen, and verification use Hugging Face defaults; dedicated endpoint URLs are optional overrides. Native PDF/PPTX parsing needs no model credential. See `.env.example`.
 
 The application never requires local Harrier, Qwen, SigLIP, VLM or image-generation weights.
 
@@ -610,3 +609,21 @@ When the endpoint does not support the requested structured-output mode, the ada
 ### Phase 6 text artifact behavior
 
 Plain-text artifacts are generated through the hosted LLM's normal text mode. They are **not** forced through JSON parsing. Structured output remains in use for PDF/Typst, PPTX, SVG, and creative-image planning where an intermediate schema is required.
+
+## Local multimodal verification (clean runtime)
+
+The supported local GUI entrypoint is:
+
+```powershell
+.\deploy_locally.ps1 -RunSmokeTests
+```
+
+It launches Streamlit on `http://127.0.0.1:8501` and invokes `build_phase6()` directly. The legacy React/FastAPI demo path was removed because it maintained a second transformation implementation and did not pass uploaded bytes through the multimodal pipeline.
+
+For local benchmarking the default session backend is in-memory. Use PostgreSQL explicitly when required:
+
+```powershell
+.\deploy_locally.ps1 -UsePostgres
+```
+
+PostgreSQL extras are isolated in `requirements-postgres.txt`; the base runtime no longer installs them unnecessarily.

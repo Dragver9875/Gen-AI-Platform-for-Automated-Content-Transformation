@@ -84,6 +84,14 @@ if (-not $SkipInstall) {
     }
     & $VenvPython -m pip install -r requirements-local-gui.txt
     if ($LASTEXITCODE -ne 0) { Fail "Dependency installation failed." }
+
+    if ($UsePostgres) {
+        if (-not (Test-Path "requirements-postgres.txt")) {
+            Fail "requirements-postgres.txt is missing."
+        }
+        & $VenvPython -m pip install -r requirements-postgres.txt
+        if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL dependency installation failed." }
+    }
 }
 else {
     Write-Warn "Skipping dependency installation."
@@ -148,12 +156,12 @@ if ($LASTEXITCODE -ne 0) { Fail "Python compile check failed." }
 
 if ($RunSmokeTests) {
     Write-Step "Running focused multimodal regression tests"
-    & $VenvPython -m pytest -q tests/test_phase2_ingestion.py tests/test_hf_docling_reranker.py tests/test_phase6_artifacts.py
+    & $VenvPython -m pytest -q tests/test_phase2_ingestion.py tests/test_hf_vlm_reranker.py tests/test_phase6_artifacts.py
     if ($LASTEXITCODE -ne 0) { Fail "Smoke tests failed. Fix the test failures before benchmarking live providers." }
 }
 
 Write-Step "Launching multimodal GUI on http://127.0.0.1:$Port"
-Write-Host "The GUI calls build_phase6() directly; it does NOT use app/server.py's synthetic fallback path." -ForegroundColor DarkGray
+Write-Host "The GUI calls build_phase6() directly and is the supported local multimodal entrypoint." -ForegroundColor DarkGray
 Write-Host "Press Ctrl+C in this terminal to stop the GUI." -ForegroundColor DarkGray
 
 $Headless = if ($NoBrowser) { "true" } else { "false" }

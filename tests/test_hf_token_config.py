@@ -19,7 +19,7 @@ BASE_ENV = {
 
 def _set_env(monkeypatch, values=None):
     prefixes = (
-        "HF_", "HARRIER_", "LLM_", "SIGLIP_", "VLM_", "CHROMA_", "DOCLING_",
+        "HF_", "HARRIER_", "LLM_", "SIGLIP_", "VLM_", "CHROMA_",
         "RERANKER_", "VERIFIER_", "SESSION_", "IMAGE_GEN_",
     )
     for key in list(os.environ):
@@ -41,10 +41,6 @@ def test_single_hf_token_configures_hf_model_layer(monkeypatch):
     assert settings.harrier_prompt_name == "web_search_query"
     assert settings.harrier_normalize is True
 
-    assert settings.docling_api_key == "hf_test_token"
-    assert settings.docling_api_url == "https://router.huggingface.co/v1/chat/completions"
-    assert settings.docling_model == "ibm-granite/granite-docling-258M"
-
     assert settings.llm_api_key == "hf_test_token"
     assert settings.llm_api_url == "https://router.huggingface.co/v1/chat/completions"
 
@@ -59,6 +55,7 @@ def test_single_hf_token_configures_hf_model_layer(monkeypatch):
     assert settings.vlm_api_key == "hf_test_token"
     assert settings.vlm_api_url == "https://router.huggingface.co/v1/chat/completions"
     assert settings.vlm_model == "Qwen/Qwen2.5-VL-3B-Instruct"
+    assert settings.vlm_fallback_models == ("zai-org/GLM-4.5V",)
     assert settings.vlm_api_style == "openai"
 
 
@@ -88,15 +85,6 @@ def test_hf_token_is_not_forwarded_to_non_hf_custom_endpoint(monkeypatch):
     _set_env(monkeypatch, values)
 
     with pytest.raises(ConfigurationError, match="VLM_API_KEY"):
-        Settings.from_env()
-
-
-def test_docling_non_hf_override_requires_its_own_explicit_key(monkeypatch):
-    values = dict(BASE_ENV)
-    values["DOCLING_API_URL"] = "https://docling.example.com/v1/chat/completions"
-    _set_env(monkeypatch, values)
-
-    with pytest.raises(ConfigurationError, match="DOCLING_API_KEY"):
         Settings.from_env()
 
 

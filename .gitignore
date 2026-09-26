@@ -27,8 +27,6 @@ ENV/
 .env.*
 !.env.example
 
-.streamlit/secrets.toml
-!.streamlit/secrets.toml.example
 
 *.pem
 *.key
@@ -91,14 +89,13 @@ uploads/
 input_files/
 outputs/
 generated/
-artifacts/
+runtime_artifacts/
 exports/
 downloads/
 
 # Keep placeholder files if used
 !uploads/.gitkeep
 !outputs/.gitkeep
-!artifacts/.gitkeep
 
 # ------------------------------------------------------------
 # Local databases / vector stores
@@ -136,25 +133,6 @@ transformers_cache/
 langgraph.db
 langgraph.sqlite
 langchain.db
-
-# ------------------------------------------------------------
-# Node / frontend
-# ------------------------------------------------------------
-node_modules/
-.next/
-out/
-.nuxt/
-.svelte-kit/
-coverage/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Frontend environment secrets
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
 
 # ------------------------------------------------------------
 # Build / deployment

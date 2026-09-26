@@ -79,6 +79,7 @@ class Phase3Nodes:
                 result, chunks = self.pipeline.ingest_and_index(path, user_id=state["user_id"], session_id=state["session_id"])
                 active.append(result.source_id)
                 warnings.extend(result.warnings)
+                meta = dict(result.provider_metadata or {})
                 ingested.append({
                     "source_id": result.source_id,
                     "filename": result.filename,
@@ -86,7 +87,13 @@ class Phase3Nodes:
                     "strategy": result.strategy,
                     "elements": len(result.elements),
                     "chunks": len(chunks),
+                    "native_text_pages": meta.get("native_text_pages"),
+                    "vlm_pages": meta.get("vlm_pages"),
+                    "embedded_pictures": meta.get("embedded_pictures"),
+                    "pictures_analyzed_by_vlm": meta.get("pictures_analyzed_by_vlm"),
+                    "vlm_models_used": meta.get("vlm_models_used") or ([meta.get("vlm_model_used")] if meta.get("vlm_model_used") else []),
                     "warnings": result.warnings,
+                    "provider_metadata": meta,
                 })
             except Exception as exc:
                 errors.append(f"Failed to ingest {raw_path}: {exc}")

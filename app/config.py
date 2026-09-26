@@ -97,13 +97,6 @@ class Settings:
     reranker_api_style: str
     reranker_model: str
 
-    # Granite Docling via Hugging Face image-text-to-text inference
-    docling_api_url: str
-    docling_api_key: str
-    docling_model: str
-    docling_timeout_s: float
-    docling_render_dpi: int
-
     # SigLIP routing. By default uses Hugging Face InferenceClient + HF_TOKEN.
     siglip_api_url: str | None
     siglip_api_key: str
@@ -113,6 +106,7 @@ class Settings:
     vlm_api_url: str
     vlm_api_key: str
     vlm_model: str
+    vlm_fallback_models: tuple[str, ...]
     vlm_api_style: str
 
     # User sessions
@@ -205,13 +199,8 @@ class Settings:
             required=True,
         )
 
-        # All ML services reuse HF_TOKEN when they are on Hugging Face infrastructure.
-        # Chroma and the session database remain the only independent credentials.
-        docling_model = _env("DOCLING_MODEL", "ibm-granite/granite-docling-258M") or "ibm-granite/granite-docling-258M"
-        docling_api_url = _env("DOCLING_API_URL") or "https://router.huggingface.co/v1/chat/completions"
-        docling_api_key = _provider_key(
-            "DOCLING_API_KEY", api_url=docling_api_url, hf_token=hf_token, required=True
-        )
+        # All hosted ML services reuse HF_TOKEN on Hugging Face infrastructure.
+        # Native PDF/PPTX parsing is deterministic and does not require a document-model endpoint.
 
         siglip_model = _env("SIGLIP_MODEL", "google/siglip-so400m-patch14-384") or "google/siglip-so400m-patch14-384"
         siglip_api_url = _env("SIGLIP_API_URL")
@@ -230,6 +219,11 @@ class Settings:
                 raise ConfigurationError("HF_TOKEN is required for default SigLIP inference")
 
         vlm_model = _env("VLM_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct") or "Qwen/Qwen2.5-VL-3B-Instruct"
+        vlm_fallback_models = tuple(
+            x.strip()
+            for x in (_env("VLM_FALLBACK_MODELS", "zai-org/GLM-4.5V") or "").split(",")
+            if x.strip() and x.strip() != vlm_model
+        )
         vlm_api_url = _env("VLM_API_URL") or "https://router.huggingface.co/v1/chat/completions"
         vlm_api_key = _provider_key(
             "VLM_API_KEY",
@@ -307,17 +301,13 @@ class Settings:
             reranker_api_key=reranker_api_key,
             reranker_api_style=(_env("RERANKER_API_STYLE", "hf_tei") or "hf_tei").lower(),
             reranker_model=_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3") or "BAAI/bge-reranker-v2-m3",
-            docling_api_url=docling_api_url,
-            docling_api_key=docling_api_key or "",
-            docling_model=docling_model,
-            docling_timeout_s=_env_float("DOCLING_TIMEOUT_S", 180.0),
-            docling_render_dpi=_env_int("DOCLING_RENDER_DPI", 144),
             siglip_api_url=siglip_api_url,
             siglip_api_key=siglip_api_key or "",
             siglip_model=siglip_model,
             vlm_api_url=vlm_api_url,
             vlm_api_key=vlm_api_key or "",
             vlm_model=vlm_model,
+            vlm_fallback_models=vlm_fallback_models,
             vlm_api_style=vlm_api_style,
             session_store_backend=(_env("SESSION_STORE_BACKEND", "memory") or "memory").lower(),
             session_database_url=_env("SESSION_DATABASE_URL"),
@@ -361,7 +351,7 @@ class Settings:
             phase5_evidence_chars_per_claim=_env_int("PHASE5_EVIDENCE_CHARS_PER_CLAIM", 8000),
             phase5_default_verification_profile=(_env("PHASE5_DEFAULT_VERIFICATION_PROFILE", "strict") or "strict").lower(),
             phase5_verification_profiles_json=_env("PHASE5_VERIFICATION_PROFILES_JSON"),
-            phase6_output_dir=_env("PHASE6_OUTPUT_DIR", "artifacts") or "artifacts",
+            phase6_output_dir=_env("PHASE6_OUTPUT_DIR", "runtime_artifacts") or "runtime_artifacts",
             phase6_artifact_specs_path=_env("PHASE6_ARTIFACT_SPECS_PATH", "artifacts/specs/default.json") or "artifacts/specs/default.json",
             phase6_typst_binary=_env("PHASE6_TYPST_BINARY", "typst") or "typst",
             phase6_retain_typst_source=_env_bool("PHASE6_RETAIN_TYPST_SOURCE", True),

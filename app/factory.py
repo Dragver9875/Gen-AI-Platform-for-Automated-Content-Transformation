@@ -23,7 +23,6 @@ from generation.service import GenerationService
 from ingestion.chunker import StructureAwareChunker
 from ingestion.preflight import PdfPreflight
 from ingestion.router import IngestionRouter
-from providers.docling import DoclingAPIProvider
 from providers.harrier import HarrierEmbeddingProvider
 from providers.image_generation import HostedImageGenerationProvider
 from providers.llm import HostedLLMProvider
@@ -39,18 +38,6 @@ from verification.service import VerificationService
 
 def build_provider_registry(settings: Settings, *, include_generation: bool = False, include_image_generation: bool = False) -> ProviderRegistry:
     registry = ProviderRegistry()
-    registry.register(
-        ProviderCapability.DOCUMENT_UNDERSTANDING,
-        DoclingAPIProvider(
-            settings.docling_api_url,
-            settings.docling_api_key,
-            model=settings.docling_model,
-            timeout_s=settings.docling_timeout_s,
-            retries=settings.http_retries,
-            render_dpi=settings.docling_render_dpi,
-        ),
-        name="docling",
-    )
     registry.register(
         ProviderCapability.VISUAL_ROUTING,
         SigLIPRoutingProvider(
@@ -68,6 +55,7 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
             settings.vlm_api_url,
             settings.vlm_api_key,
             model=settings.vlm_model,
+            fallback_models=settings.vlm_fallback_models,
             api_style=settings.vlm_api_style,
             timeout_s=settings.http_timeout_s,
             retries=settings.http_retries,
@@ -149,14 +137,12 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
 
 def build_phase12(settings: Settings, *, providers: ProviderRegistry | None = None):
     providers = providers or build_provider_registry(settings)
-    docling = providers.resolve(ProviderCapability.DOCUMENT_UNDERSTANDING)
     siglip = providers.resolve(ProviderCapability.VISUAL_ROUTING)
     vlm = providers.resolve(ProviderCapability.VISUAL_UNDERSTANDING)
     embedder = providers.resolve(ProviderCapability.EMBEDDING)
     reranker = providers.resolve(ProviderCapability.RERANKING, required=False)
 
     router = IngestionRouter(
-        docling=docling,
         siglip=siglip,
         vlm=vlm,
         pdf_preflight=PdfPreflight(
