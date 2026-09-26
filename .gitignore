@@ -197,3 +197,8 @@ eval_reports/
 
 # Temporary inline prompt sources created by run_ps.ps1
 .runtime_inputs/
+
+# Local multimodal GUI runtime
+.venv_local/
+.local_gui_uploads/
+.streamlit/cache/
