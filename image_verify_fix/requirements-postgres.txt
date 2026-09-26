@@ -1,0 +1,3 @@
+# Optional: only required when SESSION_STORE_BACKEND=postgres.
+psycopg[binary]>=3.2,<4
+langgraph-checkpoint-postgres>=2,<4

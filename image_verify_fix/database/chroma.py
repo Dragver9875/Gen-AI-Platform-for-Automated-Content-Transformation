@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import json
+import time
+from typing import Any
+
+from core.telemetry import TelemetryEvent, record_event
+
+
+
+def _safe_metadata(metadata: dict[str, Any]) -> dict[str, str | int | float | bool]:
+    safe: dict[str, str | int | float | bool] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            safe[key] = value
+        else:
+            safe[key] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return safe
+
+
+class ChromaCloudStore:
+    def __init__(self, api_key: str, tenant: str, database: str, collection_name: str):
+        try:
+            import chromadb
+        except ImportError as exc:
+            raise RuntimeError("chromadb is required for Chroma Cloud. Install requirements.txt") from exc
+        self.client = chromadb.CloudClient(api_key=api_key, tenant=tenant, database=database)
+        self.collection = self.client.get_or_create_collection(name=collection_name)
+
+    def upsert(self, ids: list[str], documents: list[str], metadatas: list[dict[str, Any]], embeddings: list[list[float]]) -> None:
+        started = time.perf_counter()
+        try:
+            self.collection.upsert(
+                ids=ids, documents=documents,
+                metadatas=[_safe_metadata(m) for m in metadatas], embeddings=embeddings,
+            )
+            record_event(TelemetryEvent("chroma", "upsert", (time.perf_counter()-started)*1000.0, True, 1, metadata={"count": len(ids)}))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "upsert", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
+
+    def vector_query(self, query_embedding: list[float], *, top_k: int, where: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {
+            "query_embeddings": [query_embedding],
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where:
+            kwargs["where"] = where
+        started = time.perf_counter()
+        try:
+            result = self.collection.query(**kwargs)
+            record_event(TelemetryEvent("chroma", "query", (time.perf_counter()-started)*1000.0, True, 1, metadata={"top_k": top_k}))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "query", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
+        return [
+            {"id": idx, "text": text, "metadata": metadata or {}, "distance": float(distance)}
+            for idx, text, metadata, distance in zip(
+                result["ids"][0], result["documents"][0], result["metadatas"][0], result["distances"][0]
+            )
+        ]
+
+    def get_documents(self, *, where: dict[str, Any] | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {"include": ["documents", "metadatas"]}
+        if where:
+            kwargs["where"] = where
+        if limit is not None:
+            kwargs["limit"] = limit
+        started = time.perf_counter()
+        try:
+            result = self.collection.get(**kwargs)
+            record_event(TelemetryEvent("chroma", "get", (time.perf_counter()-started)*1000.0, True, 1))
+        except Exception as exc:
+            record_event(TelemetryEvent("chroma", "get", (time.perf_counter()-started)*1000.0, False, 1, metadata={"error": str(exc)}))
+            raise
+        return [
+            {"id": idx, "text": text, "metadata": metadata or {}}
+            for idx, text, metadata in zip(result["ids"], result["documents"], result["metadatas"])
+        ]
+
+    def delete_source(self, user_id: str, session_id: str, source_id: str) -> None:
+        self.collection.delete(where={"$and": [
+            {"user_id": user_id}, {"session_id": session_id}, {"source_id": source_id}
+        ]})
+
+    def delete_session(self, user_id: str, session_id: str) -> None:
+        self.collection.delete(where={"$and": [{"user_id": user_id}, {"session_id": session_id}]})
+
+    def delete_user(self, user_id: str) -> None:
+        self.collection.delete(where={"user_id": user_id})

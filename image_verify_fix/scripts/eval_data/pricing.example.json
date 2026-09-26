@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "input_per_million": 0.0,
+    "output_per_million": 0.0,
+    "per_request": 0.0
+  },
+  "image_generation": {
+    "per_request": 0.0
+  },
+  "harrier": {
+    "per_request": 0.0
+  },
+  "vlm": {
+    "per_request": 0.0
+  },
+  "siglip": {
+    "per_request": 0.0
+  }
+}
