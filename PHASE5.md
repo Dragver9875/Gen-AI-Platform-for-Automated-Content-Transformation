@@ -15,7 +15,7 @@ Phase 5 extends the Phase 4 Canonical Response Representation (CRR) pipeline wit
 ## Status values
 
 - `phase5_complete`: every factual claim is supported.
-- `phase5_complete_with_issues`: the repair limit was reached with unresolved claims.
+- `phase5_complete_with_issues`: unresolved claims remain because the repair limit was reached or a repair provider call was unavailable.
 - `indexed_ready`: the request only indexed files and did not request generation.
 - `error`: an unrecoverable pipeline/provider error occurred.
 
@@ -54,3 +54,7 @@ python -m scripts.run_phase5 \
   --mode transform \
   --artifact-type executive_summary
 ```
+
+## Evidence IDs and repair failures
+
+Phase 5 model prompts use `E1`/`E2` evidence aliases rather than vector-store chunk hashes. The runtime maps aliases back to real IDs internally. If a repair call fails because of provider availability, quota, or another transient API error, the existing CRR is retained and the graph finalizes with issues rather than converting the entire request into a hard error.

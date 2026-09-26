@@ -6,6 +6,7 @@ from typing import Any
 from agents.context import group_hierarchical, group_qa, render_context
 from agents.intent import IntentRouter
 from agents.state import AgentState
+from generation.evidence import EvidenceAliases
 from app.phase12 import Phase12Pipeline
 
 
@@ -170,13 +171,17 @@ class Phase3Nodes:
         docs = list(state.get("retrieved_documents") or [])
         intent = state.get("detected_intent")
         groups = group_hierarchical(docs) if intent == "transform" else group_qa(docs)
-        prepared = render_context(groups, max_chars=self.context_max_chars)
+        aliases = EvidenceAliases.from_documents(docs)
+        prepared = render_context(
+            groups, max_chars=self.context_max_chars, chunk_to_alias=aliases.chunk_to_alias
+        )
         warnings = list(state.get("warnings") or [])
         if not docs:
             warnings.append("Retrieval returned no matching chunks.")
         return {
             "context_groups": groups,
             "prepared_context": prepared,
+            "evidence_aliases": aliases.alias_to_chunk,
             "warnings": _unique(warnings),
             "status": "phase4_ready" if docs else "phase4_ready_no_results",
         }
@@ -186,6 +191,7 @@ class Phase3Nodes:
             "retrieved_documents": [],
             "context_groups": [],
             "prepared_context": "",
+            "evidence_aliases": {},
             "retrieval_mode": "none",
             "status": "indexed_ready",
         }

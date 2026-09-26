@@ -38,8 +38,8 @@ Phase 4 guarantees:
 
 1. Schema-valid CRR JSON.
 2. Source-grounded prompting.
-3. Chunk-level evidence references.
-4. Unknown/nonexistent evidence IDs are removed.
+3. Short model-facing evidence aliases (`E1`, `E2`, ...) instead of raw chunk/database IDs.
+4. Aliases are resolved back to real chunk IDs before Phase 5; unknown aliases are removed.
 5. Long-document transformations use hierarchical section coverage.
 
 Phase 4 does **not** decide whether a cited chunk truly entails a claim. Phase 5 must perform that verification and repair unsupported claims.

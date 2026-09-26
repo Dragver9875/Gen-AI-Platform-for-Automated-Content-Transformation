@@ -64,7 +64,12 @@ def group_qa(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"source_id": "retrieved", "filename": "", "section": "Top-K evidence", "chunks": documents}]
 
 
-def render_context(groups: list[dict[str, Any]], *, max_chars: int) -> str:
+def render_context(
+    groups: list[dict[str, Any]],
+    *,
+    max_chars: int,
+    chunk_to_alias: dict[str, str] | None = None,
+) -> str:
     """Create a bounded, provenance-rich text handoff.
 
     The structured `context_groups` state always retains all retrieved chunks.
@@ -94,12 +99,14 @@ def render_context(groups: list[dict[str, Any]], *, max_chars: int) -> str:
             meta = _meta(doc)
             source = meta.get("filename") or meta.get("source_id") or group.get("filename") or group.get("source_id")
             section = meta.get("section") or group.get("section") or "Unsectioned"
-            chunk_id = meta.get("chunk_id") or doc.get("id") or "unknown"
+            chunk_id = str(meta.get("chunk_id") or doc.get("id") or "unknown")
+            evidence_label = (chunk_to_alias or {}).get(chunk_id, chunk_id)
+            evidence_key = "EVIDENCE" if chunk_to_alias is not None else "CHUNK"
             block = (
                 f"SOURCE: {source}\n"
                 f"SECTION: {section}\n"
                 f"{_location(meta)}\n"
-                f"CHUNK: {chunk_id}\n\n"
+                f"{evidence_key}: {evidence_label}\n\n"
                 f"{str(doc.get('text', '')).strip()}\n"
             )
             if used + len(block) > max_chars:

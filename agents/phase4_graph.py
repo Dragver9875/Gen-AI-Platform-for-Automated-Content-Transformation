@@ -150,6 +150,7 @@ class Phase4Orchestrator:
             "retrieved_documents": [],
             "context_groups": [],
             "prepared_context": "",
+            "evidence_aliases": {},
             "canonical_response": {},
             "section_digests": [],
             "generation_metadata": {},

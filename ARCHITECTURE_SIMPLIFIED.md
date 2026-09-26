@@ -47,3 +47,11 @@ The target is a hackathon/demo system where deployment reliability matters more 
 ## Known trade-off
 
 Every PDF page and every PPTX slide now incurs a Qwen2.5-VL call. This is intentionally simpler but slower/more expensive than selective visual fallback. `MULTIMODAL_MAX_PDF_PAGES` and `MULTIMODAL_MAX_PPTX_SLIDES` provide explicit caps for interactive testing.
+
+## Evidence aliasing
+
+Model-facing prompts never expose storage/vector chunk IDs. Retrieved chunks are assigned deterministic short aliases (`E1`, `E2`, ...). Phase 4 generation, Phase 5 verification, and repair use only those aliases; the application resolves them back to the real chunk IDs before persistence and deterministic verification. Unknown aliases are discarded rather than being treated as valid citations.
+
+## Non-fatal repair failures
+
+Phase 5 repair is best-effort. If the shared inference provider is unavailable, rate-limited, or out of quota during a repair call, the current CRR and verification report are retained and the run terminates as `phase5_complete_with_issues` rather than `error`. No unsupported claim is silently promoted to supported.

@@ -296,3 +296,60 @@ def test_verifier_failure_degrades_to_complete_with_issues(tmp_path):
     assert state["verification_metadata"]["verification_degraded"] is True
     assert state["repair_attempts"] == 0
     assert any("Semantic verifier unavailable" in warning for warning in state["warnings"])
+
+
+class QuotaRepairLLM:
+    def generate_json(self, **kwargs):
+        raise RuntimeError('HTTP 402 from provider: credits exhausted')
+
+
+def test_repair_provider_failure_is_nonfatal_and_retains_crr():
+    from agents.phase5_nodes import Phase5Nodes
+    generator = GenerationLLM(wrong_number=True)
+    state = {
+        "query": "What changed?",
+        "transformation_config": {},
+        "retrieved_documents": FakeRetriever().docs,
+        "evidence_aliases": {"E1": "c1", "E2": "c2"},
+        "canonical_response": generator.generate_json(
+            system_prompt="", user_prompt="", schema_name="canonical_response",
+            json_schema={}, temperature=0.0, max_tokens=100,
+        ),
+        "verification_report": {
+            "verification_version": "1.0",
+            "passed": False,
+            "faithfulness_score": 0.0,
+            "supported_claims": 0,
+            "partially_supported_claims": 0,
+            "unsupported_claims": 1,
+            "insufficient_evidence_claims": 0,
+            "claims": [{
+                "claim_id": "claim_1",
+                "claim_text": "Threat activity increased by 42 percent.",
+                "status": "unsupported",
+                "confidence": 1.0,
+                "cited_evidence": ["c1"],
+                "supported_evidence": [],
+                "rationale": "numeric conflict",
+                "unsupported_fragments": ["42 percent"],
+                "suggested_correction": "Use 32 percent.",
+                "deterministic_issues": [],
+            }],
+            "warnings": [],
+            "repair_attempts": 0,
+            "max_repair_attempts": 2,
+        },
+        "repair_attempts": 0,
+        "verification_metadata": {},
+        "warnings": [],
+        "errors": [],
+    }
+    verifier = VerificationService(SemanticVerifierLLM(), repair_generator=QuotaRepairLLM())
+    result = Phase5Nodes(verifier).repair_crr(state)
+    assert result["status"] == "phase5_repair_unavailable"
+    assert result["verification_requires_repair"] is False
+    assert result["repair_attempts"] == 1
+    assert result["verification_metadata"]["repair_degraded"] is True
+    assert "402" in result["verification_metadata"]["repair_failure"]
+    assert result.get("errors") is None
+    assert any("current CRR was retained" in warning for warning in result["warnings"])

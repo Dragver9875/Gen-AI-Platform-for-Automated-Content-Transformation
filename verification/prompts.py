@@ -50,15 +50,25 @@ def repair_user_prompt(
     *,
     query: str,
     config: TransformationConfig,
-    crr: CanonicalResponse,
-    report: VerificationReport,
+    crr: CanonicalResponse | dict[str, Any],
+    report: VerificationReport | dict[str, Any],
     evidence: list[dict[str, Any]],
 ) -> str:
+    crr_json = (
+        crr.model_dump_json(indent=2)
+        if hasattr(crr, "model_dump_json")
+        else json.dumps(crr, ensure_ascii=False, indent=2)
+    )
+    report_json = (
+        report.model_dump_json(indent=2)
+        if hasattr(report, "model_dump_json")
+        else json.dumps(report, ensure_ascii=False, indent=2)
+    )
     return (
         f"USER REQUEST:\n{query.strip()}\n\n"
         f"TRANSFORMATION CONFIGURATION:\n{config.model_dump_json(indent=2)}\n\n"
-        f"CURRENT CRR:\n{crr.model_dump_json(indent=2)}\n\n"
-        f"VERIFICATION REPORT:\n{report.model_dump_json(indent=2)}\n\n"
+        f"CURRENT CRR:\n{crr_json}\n\n"
+        f"VERIFICATION REPORT:\n{report_json}\n\n"
         "SOURCE EVIDENCE FOR REPAIR:\n"
         + json.dumps(evidence, ensure_ascii=False, indent=2)
         + "\n\nReturn the repaired CRR only."

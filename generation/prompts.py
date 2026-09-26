@@ -9,9 +9,9 @@ from generation.crr import CanonicalResponse, SectionDigest, TransformationConfi
 GROUNDING_RULES = """\
 Use only the supplied source evidence. Do not introduce facts, numbers, names, dates,
 causal claims, recommendations, or quotations that are not supported by that evidence.
-Every factual claim must cite one or more CHUNK identifiers exactly as supplied.
-If the evidence is insufficient, say so explicitly in the content and record the gap in
-'insufficiencies'. Do not fabricate an evidence identifier.
+Every factual claim must cite one or more short EVIDENCE aliases (for example E1, E2) exactly as supplied.
+Never invent, transform, or guess an evidence alias. If the evidence is insufficient, say so explicitly in the content and record the gap in
+'insufficiencies'.
 """
 
 
@@ -69,5 +69,5 @@ def synthesis_user_prompt(
         "STRUCTURAL SOURCE DIGESTS:\n"
         f"{digest_json}\n\n"
         "Synthesize the requested artifact as a Canonical Response Representation. Preserve coverage "
-        "across the supplied sections and only cite evidence IDs present in the digests."
+        "across the supplied sections and only cite EVIDENCE aliases present in the digests."
     )

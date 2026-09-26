@@ -3,13 +3,8 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from agents.context import render_context
-from generation.crr import (
-    CanonicalResponse,
-    SectionDigest,
-    TransformationConfig,
-    available_chunk_ids,
-    sanitize_evidence,
-)
+from generation.crr import CanonicalResponse, SectionDigest, TransformationConfig, available_chunk_ids
+from generation.evidence import EvidenceAliases, resolve_crr_aliases, resolve_digest_aliases
 from generation.prompts import (
     crr_system_prompt,
     digest_system_prompt,
@@ -33,12 +28,10 @@ class StructuredGenerator(Protocol):
 
 
 class GenerationService:
-    """Phase 4 grounded generation service.
+    """Phase 4 grounded generation service with short evidence aliases.
 
-    QA uses one grounded model call. Whole-document transformations use a
-    hierarchical strategy: every Phase 3 structural group is digested first,
-    then those digests are synthesized into the final CRR. No semantic
-    factuality decision is made here; that belongs to Phase 5.
+    Model-facing prompts use E1/E2/... rather than storage/database chunk IDs.
+    Real chunk IDs are restored before Phase 5 and persistence.
     """
 
     def __init__(
@@ -63,10 +56,19 @@ class GenerationService:
             return raw
         return TransformationConfig.model_validate(raw)
 
+    @staticmethod
+    def aliases_from_state(state: dict[str, Any]) -> EvidenceAliases:
+        serialized = dict(state.get("evidence_aliases") or {})
+        if serialized:
+            return EvidenceAliases.from_serialized(serialized)
+        return EvidenceAliases.from_documents(list(state.get("retrieved_documents") or []))
+
     def generate_qa(self, state: dict[str, Any]) -> tuple[CanonicalResponse, list[str], dict[str, Any]]:
         config = self.config_from_state(state)
         if config.artifact_type == "auto":
             config = config.model_copy(update={"artifact_type": "answer"})
+        docs = list(state.get("retrieved_documents") or [])
+        aliases = self.aliases_from_state(state)
         data = self.llm.generate_json(
             system_prompt=crr_system_prompt(),
             user_prompt=qa_user_prompt(
@@ -80,17 +82,33 @@ class GenerationService:
             max_tokens=self.max_tokens,
         )
         crr = CanonicalResponse.model_validate(data)
-        crr, warnings = sanitize_evidence(crr, available_chunk_ids(list(state.get("retrieved_documents") or [])))
-        return crr, warnings, {"strategy": "single_pass_grounded_qa", "llm_calls": 1, "section_digests": 0}
+        crr, warnings = resolve_crr_aliases(
+            crr,
+            aliases,
+            allowed_chunk_ids=available_chunk_ids(docs),
+        )
+        return crr, warnings, {
+            "strategy": "single_pass_grounded_qa",
+            "llm_calls": 1,
+            "section_digests": 0,
+            "evidence_aliases": len(aliases.alias_to_chunk),
+        }
 
     def generate_transform(self, state: dict[str, Any]) -> tuple[CanonicalResponse, list[SectionDigest], list[str], dict[str, Any]]:
         config = self.config_from_state(state)
         groups = list(state.get("context_groups") or [])
-        digests: list[SectionDigest] = []
+        docs = list(state.get("retrieved_documents") or [])
+        aliases = self.aliases_from_state(state)
+        prompt_digests: list[SectionDigest] = []
+        resolved_digests: list[SectionDigest] = []
         warnings: list[str] = []
 
         for group in groups:
-            context = render_context([group], max_chars=self.group_context_max_chars)
+            context = render_context(
+                [group],
+                max_chars=self.group_context_max_chars,
+                chunk_to_alias=aliases.chunk_to_alias,
+            )
             if not context.strip():
                 warnings.append(
                     f"Skipped empty structural group: {group.get('source_id', 'unknown')} / {group.get('section', 'Unsectioned')}"
@@ -113,21 +131,26 @@ class GenerationService:
                 "section": str(group.get("section") or "Unsectioned"),
             })
             allowed = available_chunk_ids(list(group.get("chunks") or []))
-            for claim in digest.claims:
-                invalid = [ref for ref in claim.evidence if ref not in allowed]
-                claim.evidence = list(dict.fromkeys(ref for ref in claim.evidence if ref in allowed))
-                if invalid:
-                    warnings.append(
-                        f"Section digest '{digest.section}' referenced unknown evidence IDs and they were removed: {', '.join(invalid)}"
-                    )
-            digests.append(digest)
+            resolved, digest_warnings = resolve_digest_aliases(
+                digest,
+                aliases,
+                allowed_chunk_ids=allowed,
+            )
+            warnings.extend(digest_warnings)
+            # Synthesis still sees aliases, never storage IDs. Remove any invalid
+            # aliases from the prompt digest before handing it downstream.
+            prompt_copy = digest.model_copy(deep=True)
+            for idx, claim in enumerate(prompt_copy.claims):
+                claim.evidence = aliases.to_aliases(resolved.claims[idx].evidence)
+            prompt_digests.append(prompt_copy)
+            resolved_digests.append(resolved)
 
         data = self.llm.generate_json(
             system_prompt=crr_system_prompt(),
             user_prompt=synthesis_user_prompt(
                 query=str(state.get("query") or ""),
                 config=config,
-                digests=[digest.model_dump(mode="json") for digest in digests],
+                digests=[digest.model_dump(mode="json") for digest in prompt_digests],
             ),
             schema_name="canonical_response",
             json_schema=CanonicalResponse.model_json_schema(),
@@ -135,12 +158,15 @@ class GenerationService:
             max_tokens=self.max_tokens,
         )
         crr = CanonicalResponse.model_validate(data)
-        crr, crr_warnings = sanitize_evidence(
-            crr, available_chunk_ids(list(state.get("retrieved_documents") or []))
+        crr, crr_warnings = resolve_crr_aliases(
+            crr,
+            aliases,
+            allowed_chunk_ids=available_chunk_ids(docs),
         )
         warnings.extend(crr_warnings)
-        return crr, digests, warnings, {
+        return crr, resolved_digests, warnings, {
             "strategy": "hierarchical_section_digest_synthesis",
-            "llm_calls": len(digests) + 1,
-            "section_digests": len(digests),
+            "llm_calls": len(prompt_digests) + 1,
+            "section_digests": len(prompt_digests),
+            "evidence_aliases": len(aliases.alias_to_chunk),
         }

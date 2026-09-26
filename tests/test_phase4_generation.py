@@ -230,3 +230,45 @@ def test_llm_structured_generation_falls_back_when_first_response_is_malformed()
     )
     assert data == {"ok": True}
     assert calls[:2] == ["json_schema", "json_object"]
+
+
+class AliasLLM:
+    def generate_json(self, *, system_prompt, user_prompt, schema_name, json_schema, temperature, max_tokens):
+        assert "EVIDENCE: E1" in user_prompt
+        return {
+            "crr_version": "1.0",
+            "artifact_type": "answer",
+            "title": "Threat Brief",
+            "summary": "Threat activity increased by 32 percent.",
+            "sections": [{"heading": "Answer", "content": "Grounded output", "bullets": []}],
+            "key_points": [],
+            "claims": [{"claim_id": "claim_1", "text": "Threat activity increased by 32 percent.", "evidence": ["E1"]}],
+            "rendering": {
+                "tone": "professional", "audience": "general", "language": "English",
+                "detail_level": "medium", "objective": "inform", "style": "clear",
+            },
+            "insufficiencies": [],
+        }
+
+
+def test_model_facing_evidence_alias_resolves_to_real_chunk_id():
+    service = GenerationService(AliasLLM())
+    docs = [{
+        "id": "cf8abe55a4ad93790c94",
+        "text": "Threat activity increased by 32 percent.",
+        "metadata": {"chunk_id": "cf8abe55a4ad93790c94", "source_id": "src", "filename": "x.txt"},
+    }]
+    from agents.context import group_qa, render_context
+    from generation.evidence import EvidenceAliases
+    aliases = EvidenceAliases.from_documents(docs)
+    state = {
+        "query": "What changed?",
+        "transformation_config": {},
+        "retrieved_documents": docs,
+        "evidence_aliases": aliases.alias_to_chunk,
+        "prepared_context": render_context(group_qa(docs), max_chars=10000, chunk_to_alias=aliases.chunk_to_alias),
+    }
+    crr, warnings, metadata = service.generate_qa(state)
+    assert crr.claims[0].evidence == ["cf8abe55a4ad93790c94"]
+    assert warnings == []
+    assert metadata["evidence_aliases"] == 1

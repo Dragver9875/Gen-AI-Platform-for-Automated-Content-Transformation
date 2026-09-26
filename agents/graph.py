@@ -107,6 +107,7 @@ class Phase3Orchestrator:
             "retrieved_documents": [],
             "context_groups": [],
             "prepared_context": "",
+            "evidence_aliases": {},
             "warnings": [],
             "errors": [],
         }

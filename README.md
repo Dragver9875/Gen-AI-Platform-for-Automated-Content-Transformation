@@ -136,7 +136,7 @@ For prompt-only transformations:
 
 ## Verification
 
-Phase 5 uses the same `gpt-oss-20b` provider as Phase 4. It performs semantic evidence verification plus deterministic checks for literals such as numbers/dates and bounded repair. There is no separate verifier endpoint/model to configure.
+Phase 5 uses the same `gpt-oss-20b` provider as Phase 4. It performs semantic evidence verification plus deterministic checks for literals such as numbers/dates and bounded repair. There is no separate verifier endpoint/model to configure. All model-facing citations use short `E1`/`E2` aliases; real chunk IDs remain internal. Repair-provider failures are non-fatal and finish as `complete_with_issues` while retaining the current CRR.
 
 If structured provider output is rejected or malformed, the LLM adapter degrades through:
 

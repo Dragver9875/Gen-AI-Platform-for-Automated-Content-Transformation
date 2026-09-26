@@ -22,6 +22,14 @@ def _route_after_generation(state: AgentState) -> str:
     return "error" if state.get("status") == "error" else "verify"
 
 
+def _route_after_repair(state: AgentState) -> str:
+    if state.get("status") == "error":
+        return "error"
+    if state.get("status") == "phase5_repair_unavailable":
+        return "issues"
+    return "verify"
+
+
 def _route_verification(state: AgentState) -> str:
     if state.get("status") == "error":
         return "error"
@@ -106,8 +114,8 @@ def build_phase5_graph(
     )
     builder.add_conditional_edges(
         "repair_crr",
-        _route_after_generation,
-        {"verify": "verify_crr", "error": "finalize_error"},
+        _route_after_repair,
+        {"verify": "verify_crr", "issues": "finalize_with_issues", "error": "finalize_error"},
     )
     builder.add_edge("finalize_verified", END)
     builder.add_edge("finalize_with_issues", END)
@@ -176,6 +184,7 @@ class Phase5Orchestrator(Phase4Orchestrator):
             "retrieved_documents": [],
             "context_groups": [],
             "prepared_context": "",
+            "evidence_aliases": {},
             "canonical_response": {},
             "section_digests": [],
             "generation_metadata": {},

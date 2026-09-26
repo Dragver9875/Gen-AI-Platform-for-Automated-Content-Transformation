@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from generation.crr import CanonicalResponse, TransformationConfig, available_chunk_ids, sanitize_evidence
+from generation.crr import CanonicalResponse, TransformationConfig, available_chunk_ids
+from generation.evidence import (
+    EvidenceAliases,
+    crr_to_aliases,
+    resolve_crr_aliases,
+    verification_report_to_alias_dict,
+)
 from verification.literals import DeterministicLiteralValidator
 from verification.models import (
     ClaimVerification,
@@ -43,9 +49,8 @@ def _claim_weight(status: str) -> float:
 class VerificationService:
     """Phase 5 claim verification + bounded repair service.
 
-    The semantic verifier receives only claim-cited chunks. A deterministic layer
-    independently checks critical literals; hard conflicts override a semantic
-    'supported' verdict. Scores and pass/fail decisions are calculated locally.
+    Real chunk IDs remain internal. Model-facing verification and repair prompts
+    use the same short E1/E2/... aliases introduced in Phase 4.
     """
 
     def __init__(
@@ -99,12 +104,26 @@ class VerificationService:
     def _document_map(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return {_chunk_id(doc): doc for doc in list(state.get("retrieved_documents") or []) if _chunk_id(doc)}
 
-    def _evidence_for_claim(self, claim, documents: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    @staticmethod
+    def _aliases(state: dict[str, Any]) -> EvidenceAliases:
+        serialized = dict(state.get("evidence_aliases") or {})
+        if serialized:
+            return EvidenceAliases.from_serialized(serialized)
+        return EvidenceAliases.from_documents(list(state.get("retrieved_documents") or []))
+
+    def _evidence_for_claim(
+        self,
+        claim,
+        documents: dict[str, dict[str, Any]],
+        aliases: EvidenceAliases,
+    ) -> tuple[list[dict[str, Any]], str, set[str]]:
         blocks: list[dict[str, Any]] = []
         texts: list[str] = []
+        raw_ids: set[str] = set()
         used = 0
         for evidence_id in claim.evidence:
-            doc = documents.get(str(evidence_id))
+            raw_id = str(evidence_id)
+            doc = documents.get(raw_id)
             if not doc:
                 continue
             text = str(doc.get("text") or "").strip()
@@ -116,8 +135,12 @@ class VerificationService:
             text = text[:remaining]
             used += len(text)
             meta = _meta(doc)
+            alias = aliases.chunk_to_alias.get(raw_id)
+            if not alias:
+                continue
+            raw_ids.add(raw_id)
             blocks.append({
-                "chunk_id": str(evidence_id),
+                "evidence_id": alias,
                 "source_id": str(meta.get("source_id") or ""),
                 "filename": str(meta.get("filename") or ""),
                 "section": str(meta.get("section") or ""),
@@ -128,23 +151,24 @@ class VerificationService:
                 "text": text,
             })
             texts.append(text)
-        return blocks, "\n\n".join(texts)
+        return blocks, "\n\n".join(texts), raw_ids
 
     def verify(self, state: dict[str, Any]) -> tuple[VerificationReport, list[str], dict[str, Any]]:
         crr = self._crr(state)
         config = self._config(state)
         profile = self.profile_registry.resolve(config.verification_profile)
         documents = self._document_map(state)
+        aliases = self._aliases(state)
         warnings: list[str] = []
         semantic: dict[str, SemanticClaimAssessment] = {}
         calls = 0
         verifier_degraded = False
 
         items: list[dict[str, Any]] = []
-        evidence_cache: dict[str, tuple[list[dict[str, Any]], str]] = {}
+        evidence_cache: dict[str, tuple[list[dict[str, Any]], str, set[str]]] = {}
         for claim in crr.claims:
-            blocks, combined = self._evidence_for_claim(claim, documents)
-            evidence_cache[claim.claim_id] = (blocks, combined)
+            blocks, combined, raw_ids = self._evidence_for_claim(claim, documents, aliases)
+            evidence_cache[claim.claim_id] = (blocks, combined, raw_ids)
             items.append({"claim_id": claim.claim_id, "claim": claim.text, "cited_evidence": blocks})
 
         for start in range(0, len(items), self.max_claims_per_call):
@@ -167,16 +191,19 @@ class VerificationService:
                     if assessment.claim_id not in requested:
                         warnings.append(f"Verifier returned unknown claim_id '{assessment.claim_id}' and it was ignored.")
                         continue
-                    assessment.supported_evidence = [
-                        ref for ref in assessment.supported_evidence
-                        if ref in {b["chunk_id"] for b in evidence_cache[assessment.claim_id][0]}
-                    ]
+                    allowed_raw = evidence_cache[assessment.claim_id][2]
+                    supported, invalid = aliases.resolve(
+                        assessment.supported_evidence,
+                        allowed_chunk_ids=allowed_raw,
+                    )
+                    assessment.supported_evidence = supported
+                    if invalid:
+                        warnings.append(
+                            f"Verifier returned unknown evidence aliases for {assessment.claim_id} and they were ignored: "
+                            + ", ".join(invalid)
+                        )
                     semantic[assessment.claim_id] = assessment
             except Exception as exc:
-                # Verification is a safety/quality gate, not a reason to lose a
-                # successfully ingested/generated result. Fail conservatively:
-                # unresolved claims become insufficient_evidence and the graph
-                # surfaces complete_with_issues instead of a hard pipeline error.
                 verifier_degraded = True
                 warnings.append(
                     f"Semantic verifier unavailable or returned malformed structured output; "
@@ -185,7 +212,7 @@ class VerificationService:
 
         results: list[ClaimVerification] = []
         for claim in crr.claims:
-            blocks, combined = evidence_cache[claim.claim_id]
+            blocks, combined, _ = evidence_cache[claim.claim_id]
             assessment = semantic.get(claim.claim_id)
             if not blocks:
                 assessment = SemanticClaimAssessment(
@@ -263,37 +290,43 @@ class VerificationService:
             "verification_profile": profile.name,
             "verification_threshold": threshold,
             "verification_degraded": verifier_degraded,
+            "evidence_aliases": len(aliases.alias_to_chunk),
         }
 
     def repair(self, state: dict[str, Any], report: VerificationReport) -> tuple[CanonicalResponse, list[str], dict[str, Any]]:
         crr = self._crr(state)
         config = self._config(state)
         documents = self._document_map(state)
+        aliases = self._aliases(state)
         evidence_ids: list[str] = []
         for result in report.claims:
             if result.status != "supported":
                 evidence_ids.extend(result.cited_evidence)
         evidence_ids = list(dict.fromkeys(evidence_ids))
+
         evidence: list[dict[str, Any]] = []
         for evidence_id in evidence_ids:
             doc = documents.get(evidence_id)
-            if not doc:
+            alias = aliases.chunk_to_alias.get(evidence_id)
+            if not doc or not alias:
                 continue
             meta = _meta(doc)
             evidence.append({
-                "chunk_id": evidence_id,
+                "evidence_id": alias,
                 "source_id": str(meta.get("source_id") or ""),
                 "section": str(meta.get("section") or ""),
                 "text": str(doc.get("text") or "")[: self.evidence_chars_per_claim],
             })
 
+        model_crr = crr_to_aliases(crr, aliases)
+        model_report = verification_report_to_alias_dict(report, aliases)
         data = self.repair_generator.generate_json(
             system_prompt=repair_system_prompt(),
             user_prompt=repair_user_prompt(
                 query=str(state.get("query") or ""),
                 config=config,
-                crr=crr,
-                report=report,
+                crr=model_crr,
+                report=model_report,
                 evidence=evidence,
             ),
             schema_name="canonical_response",
@@ -302,5 +335,13 @@ class VerificationService:
             max_tokens=self.repair_max_tokens,
         )
         repaired = CanonicalResponse.model_validate(data)
-        repaired, warnings = sanitize_evidence(repaired, available_chunk_ids(list(state.get("retrieved_documents") or [])))
-        return repaired, warnings, {"repair_llm_calls": 1, "repair_evidence_chunks": len(evidence)}
+        repaired, warnings = resolve_crr_aliases(
+            repaired,
+            aliases,
+            allowed_chunk_ids=available_chunk_ids(list(state.get("retrieved_documents") or [])),
+        )
+        return repaired, warnings, {
+            "repair_llm_calls": 1,
+            "repair_evidence_chunks": len(evidence),
+            "evidence_aliases": len(aliases.alias_to_chunk),
+        }

@@ -9,7 +9,7 @@ from agents.graph import _route_after_initialize, _route_intent
 from agents.nodes import Phase3Nodes
 from agents.phase4_graph import _route_generation
 from agents.phase4_nodes import Phase4Nodes
-from agents.phase5_graph import Phase5Orchestrator, _route_after_generation, _route_verification
+from agents.phase5_graph import Phase5Orchestrator, _route_after_generation, _route_after_repair, _route_verification
 from agents.phase5_nodes import Phase5Nodes
 from agents.phase6_nodes import Phase6Nodes
 from agents.state import AgentState
@@ -68,7 +68,7 @@ def build_phase6_graph(
     builder.add_conditional_edges("generate_qa", _route_after_generation, {"verify": "verify_crr", "error": "finalize_error"})
     builder.add_conditional_edges("generate_transform", _route_after_generation, {"verify": "verify_crr", "error": "finalize_error"})
     builder.add_conditional_edges("verify_crr", _route_verification, {"pass": "finalize_verified", "repair": "repair_crr", "issues": "finalize_with_issues", "error": "finalize_error"})
-    builder.add_conditional_edges("repair_crr", _route_after_generation, {"verify": "verify_crr", "error": "finalize_error"})
+    builder.add_conditional_edges("repair_crr", _route_after_repair, {"verify": "verify_crr", "issues": "finalize_with_issues", "error": "finalize_error"})
     builder.add_edge("finalize_verified", "generate_artifacts")
     builder.add_conditional_edges("generate_artifacts", _route_after_artifacts, {"done": END, "error": "finalize_error"})
     # Unresolved factual issues intentionally do not render final artifacts.

@@ -50,10 +50,24 @@ class Phase5Nodes:
                 "status": "phase5_repaired",
             }
         except Exception as exc:
+            # Repair is best-effort. A transient provider/quota failure must not
+            # destroy the already generated CRR or turn a quality issue into a
+            # hard pipeline failure. Retain the current CRR and finalize with
+            # unresolved verification issues.
+            verification_metadata = dict(state.get("verification_metadata") or {})
+            verification_metadata["repair_degraded"] = True
+            verification_metadata["repair_failure"] = str(exc)
+            warnings = list(state.get("warnings") or [])
+            warnings.append(
+                "Phase 5 repair could not be executed; the current CRR was retained and "
+                f"the run will complete with verification issues: {exc}"
+            )
             return {
-                "status": "error",
+                "status": "phase5_repair_unavailable",
+                "repair_attempts": int(state.get("repair_attempts") or 0) + 1,
                 "verification_requires_repair": False,
-                "errors": list(state.get("errors") or []) + [f"Phase 5 repair failed: {exc}"],
+                "verification_metadata": verification_metadata,
+                "warnings": list(dict.fromkeys(warnings)),
             }
 
     def finalize_verified(self, state: AgentState) -> dict[str, Any]:

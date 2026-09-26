@@ -35,6 +35,7 @@ class AgentState(TypedDict, total=False):
     retrieved_documents: list[dict[str, Any]]
     context_groups: list[dict[str, Any]]
     prepared_context: str
+    evidence_aliases: dict[str, str]
 
     # Phase 4 generation
     transformation_config: dict[str, Any]
