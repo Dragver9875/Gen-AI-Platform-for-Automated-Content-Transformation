@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import base64
+import io
+
+from PIL import Image
+
+from providers.http import ProviderError
 from providers.reranker import HostedReranker
 from providers.vlm import VLMProvider
 
@@ -92,3 +98,67 @@ def test_flux_hf_hub_path_needs_no_endpoint(monkeypatch):
     assert seen["api_key"] == "hf_test"
     assert seen["provider"] == "auto"
     assert seen["model"] == "black-forest-labs/FLUX.1-schnell"
+
+
+
+def _large_test_image(width=2200, height=1800):
+    image = Image.effect_noise((width, height), 80).convert("RGB")
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def test_qwen25_vl_bounds_visual_payload_before_request():
+    provider = VLMProvider(
+        "https://router.huggingface.co/v1/chat/completions",
+        "hf_test",
+        max_image_side=900,
+        max_image_bytes=220_000,
+        jpeg_quality=75,
+    )
+    seen = {}
+
+    def fake_request(method, url, **kwargs):
+        seen.update(kwargs)
+        return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+
+    provider.http.request = fake_request  # type: ignore[method-assign]
+    result = provider.describe_bytes(_large_test_image(), media_type="image/png", prompt="Read it")
+
+    assert result == "ok"
+    image_url = seen["json"]["messages"][0]["content"][1]["image_url"]["url"]
+    assert image_url.startswith("data:image/jpeg;base64,")
+    raw = base64.b64decode(image_url.split(",", 1)[1])
+    assert len(raw) <= 220_000
+    assert provider.last_payload_bytes == len(raw)
+    assert provider.last_payload_reduced is True
+
+
+def test_qwen25_vl_retries_413_with_smaller_payload():
+    provider = VLMProvider(
+        "https://router.huggingface.co/v1/chat/completions",
+        "hf_test",
+        max_image_side=1400,
+        max_image_bytes=700_000,
+        jpeg_quality=82,
+        retry_image_side=700,
+        retry_image_bytes=180_000,
+        retry_jpeg_quality=60,
+    )
+    payload_sizes = []
+
+    def fake_request(method, url, **kwargs):
+        image_url = kwargs["json"]["messages"][0]["content"][1]["image_url"]["url"]
+        payload_sizes.append(len(base64.b64decode(image_url.split(",", 1)[1])))
+        if len(payload_sizes) == 1:
+            raise ProviderError("HTTP 413 from provider", status_code=413)
+        return _FakeResponse({"choices": [{"message": {"content": "recovered"}}]})
+
+    provider.http.request = fake_request  # type: ignore[method-assign]
+    result = provider.describe_bytes(_large_test_image(), media_type="image/png", prompt="Read it")
+
+    assert result == "recovered"
+    assert len(payload_sizes) == 2
+    assert payload_sizes[1] < payload_sizes[0]
+    assert payload_sizes[1] <= 180_000
+    assert provider.last_413_retry is True

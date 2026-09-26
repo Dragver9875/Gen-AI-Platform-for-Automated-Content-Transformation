@@ -33,6 +33,18 @@ services:
         value: "100"
       - key: QWEN_VL_MODEL
         value: Qwen/Qwen2.5-VL-3B-Instruct:featherless-ai
+      - key: QWEN_VL_MAX_IMAGE_SIDE
+        value: "1800"
+      - key: QWEN_VL_MAX_IMAGE_BYTES
+        value: "1200000"
+      - key: QWEN_VL_JPEG_QUALITY
+        value: "82"
+      - key: QWEN_VL_RETRY_IMAGE_SIDE
+        value: "1280"
+      - key: QWEN_VL_RETRY_IMAGE_BYTES
+        value: "650000"
+      - key: QWEN_VL_RETRY_JPEG_QUALITY
+        value: "68"
       - key: LLM_MODEL
         value: openai/gpt-oss-20b:fastest
       - key: IMAGE_GEN_API_STYLE
