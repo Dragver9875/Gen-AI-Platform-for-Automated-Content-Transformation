@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: omnitransform
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: uvicorn app.web_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: HF_TOKEN
+        sync: false
+      - key: CHROMA_API_KEY
+        sync: false
+      - key: CHROMA_TENANT
+        sync: false
+      - key: CHROMA_DATABASE
+        sync: false
+      - key: SESSION_STORE_BACKEND
+        value: postgres
+      - key: SESSION_DATABASE_URL
+        fromDatabase:
+          name: omnitransform-db
+          property: connectionString
+      - key: PHASE6_OUTPUT_DIR
+        value: runtime_artifacts
+      - key: WEB_MAX_WORKERS
+        value: "3"
+      - key: WEB_MAX_FILE_MB
+        value: "40"
+      - key: WEB_MAX_TOTAL_UPLOAD_MB
+        value: "100"
+      - key: QWEN_VL_MODEL
+        value: Qwen/Qwen2.5-VL-3B-Instruct
+      - key: LLM_MODEL
+        value: openai/gpt-oss-20b:fastest
+      - key: IMAGE_GEN_API_STYLE
+        value: hf_hub
+      - key: IMAGE_GEN_MODEL
+        value: black-forest-labs/FLUX.1-schnell
+      - key: IMAGE_GEN_PROVIDER
+        value: auto
+
+databases:
+  - name: omnitransform-db
+    plan: free
+    databaseName: omnitransform
+    user: omnitransform

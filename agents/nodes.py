@@ -53,13 +53,33 @@ class Phase3Nodes:
                 "errors": ["session_id is required."],
                 "detected_intent": "error",
             }
+        active_source_ids = list(state.get("active_source_ids") or [])
+        # Recover a chat's indexed sources from Chroma if the process/LangGraph
+        # checkpoint was restarted. This makes Render redeploys less disruptive:
+        # session metadata can live in Postgres while source chunks remain in Chroma.
+        if not active_source_ids and not (state.get("pending_source_paths") or []):
+            try:
+                docs = self.pipeline.retriever.get_corpus(
+                    where={"$and": [{"user_id": user_id}, {"session_id": session_id}]},
+                    limit=5000,
+                )
+                active_source_ids = _unique([
+                    str((doc.get("metadata") or {}).get("source_id") or "")
+                    for doc in docs
+                    if (doc.get("metadata") or {}).get("source_id")
+                ])
+            except Exception:
+                # Retrieval itself will surface a useful error later if the external
+                # vector store is unavailable. Initialization should remain lightweight.
+                pass
+
         return {
             "user_id": user_id,
             "session_id": session_id,
             "status": "initialized",
             "warnings": list(state.get("warnings") or []),
             "errors": list(state.get("errors") or []),
-            "active_source_ids": list(state.get("active_source_ids") or []),
+            "active_source_ids": active_source_ids,
             "ingested_sources": list(state.get("ingested_sources") or []),
             "top_k": int(state.get("top_k") or self.default_top_k),
         }

@@ -183,3 +183,7 @@ eval_reports/
 
 # Local GUI logs
 .runtime_logs/
+
+# Web runtime
+runtime_uploads/
+.runtime_jobs/

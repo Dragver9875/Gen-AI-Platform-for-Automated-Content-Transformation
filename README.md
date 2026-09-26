@@ -191,3 +191,10 @@ python -m pytest -q `
 - `.tif` / `.tiff`
 
 Legacy binary `.ppt` is intentionally unsupported; convert it to `.pptx` first.
+
+## Render chat frontend
+
+The deployable frontend lives in `web/` and is served by `app.web_server:app`.
+It mirrors a new-chat workflow: attach sources from the `+` button, select one or more output artifacts, send the instruction, and continue in another chat while the first job runs asynchronously.
+
+For Render deployment use `render.yaml`; see `DEPLOY_RENDER.md`.

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OmniTransform</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">O</div>
+        <div class="brand-name">OmniTransform</div>
+        <button class="icon-button mobile-close" id="closeSidebar" aria-label="Close sidebar">×</button>
+      </div>
+      <button class="new-chat" id="newChatBtn"><span class="plus">＋</span><span>New chat</span></button>
+      <div class="sidebar-label">Chats</div>
+      <div id="chatList" class="chat-list"></div>
+      <div class="sidebar-footer">
+        <div class="status-dot"></div>
+        <div>
+          <div class="footer-title">Phase 6 pipeline</div>
+          <div class="footer-sub" id="runtimeStatus">Checking configuration…</div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button hamburger" id="openSidebar" aria-label="Open sidebar">☰</button>
+        <div class="topbar-title" id="chatTitle">New chat</div>
+        <div class="topbar-spacer"></div>
+        <button class="icon-button" id="newChatTop" title="New chat" aria-label="New chat">✎</button>
+      </header>
+
+      <section class="conversation" id="conversation">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-logo">O</div>
+          <h1>What can I transform for you?</h1>
+          <p>Upload text, images, PDFs or PPTX files, choose the outputs you need, and send an instruction.</p>
+        </div>
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <section class="composer-zone">
+        <div id="stagedFiles" class="staged-files"></div>
+        <div class="composer">
+          <textarea id="messageInput" rows="1" placeholder="Message OmniTransform"></textarea>
+          <div class="composer-actions">
+            <div class="left-actions">
+              <button class="circle-button" id="attachBtn" title="Add files" aria-label="Add files">＋</button>
+              <input id="fileInput" type="file" multiple hidden accept=".txt,.md,.pdf,.pptx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" />
+              <div class="output-picker-wrap">
+                <button class="output-button" id="outputButton" type="button">
+                  <span id="outputButtonLabel">Text</span>
+                  <span class="chevron">⌄</span>
+                </button>
+                <div class="output-menu" id="outputMenu"></div>
+              </div>
+            </div>
+            <button class="send-button" id="sendBtn" aria-label="Send">↑</button>
+          </div>
+        </div>
+        <div class="composer-note">Outputs may contain errors. Verify critical information before publishing.</div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastHost" class="toast-host"></div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
