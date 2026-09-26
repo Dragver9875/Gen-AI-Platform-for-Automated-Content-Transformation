@@ -22,9 +22,103 @@ function Write-Warn([string]$Message) {
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
 }
 
+function Write-Ok([string]$Message) {
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
 function Fail([string]$Message) {
     Write-Host "[ERROR] $Message" -ForegroundColor Red
     exit 1
+}
+
+function Test-PythonVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Command,
+        [string[]]$PrefixArgs = @()
+    )
+
+    try {
+        # Keep a failed native probe from terminating this script under
+        # $ErrorActionPreference = 'Stop'.
+        $oldPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $versionText = & $Command @PrefixArgs -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>$null
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $oldPreference
+        }
+
+        if ($exitCode -ne 0 -or -not $versionText) {
+            return $null
+        }
+
+        $version = [Version]($versionText.Trim())
+        if ($version -lt [Version]"3.11.0") {
+            return $null
+        }
+
+        return $version
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-BootstrapPython {
+    # 1) Prefer the interpreter backing the currently active virtual environment.
+    #    This is the most reliable choice when the user launched this script from
+    #    an already-working project shell, e.g. '(.venv) PS ...>'.
+    if ($env:VIRTUAL_ENV) {
+        $activePython = Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
+        if (Test-Path $activePython) {
+            $version = Test-PythonVersion -Command $activePython
+            if ($version) {
+                return [PSCustomObject]@{
+                    Command = $activePython
+                    PrefixArgs = @()
+                    Version = $version
+                    Source = "active virtual environment"
+                }
+            }
+        }
+    }
+
+    # 2) Prefer python/python3 from PATH before touching the Windows py launcher.
+    foreach ($name in @("python", "python3")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $exe = if ($cmd.Source) { $cmd.Source } else { $name }
+            $version = Test-PythonVersion -Command $exe
+            if ($version) {
+                return [PSCustomObject]@{
+                    Command = $exe
+                    PrefixArgs = @()
+                    Version = $version
+                    Source = "$name on PATH"
+                }
+            }
+        }
+    }
+
+    # 3) Only then try the Windows launcher. Missing registered runtimes are
+    #    treated as a normal failed probe rather than a fatal PowerShell error.
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($flag in @("-3.13", "-3.12", "-3.11", "-3")) {
+            $version = Test-PythonVersion -Command "py" -PrefixArgs @($flag)
+            if ($version) {
+                return [PSCustomObject]@{
+                    Command = "py"
+                    PrefixArgs = @($flag)
+                    Version = $version
+                    Source = "Windows py launcher $flag"
+                }
+            }
+        }
+    }
+
+    return $null
 }
 
 Write-Host "OmniTransform local multimodal deployment" -ForegroundColor Green
@@ -43,35 +137,41 @@ $VenvDir = Join-Path $RepoRoot ".venv_local"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
 if (-not (Test-Path $VenvPython)) {
+    Write-Step "Selecting Python 3.11+ bootstrap interpreter"
+    $bootstrap = Get-BootstrapPython
+    if (-not $bootstrap) {
+        Fail @"
+Python 3.11+ could not be located.
+
+If Python is already installed, verify one of these works:
+  python --version
+  py -0p
+
+Otherwise install Python 3.12, reopen PowerShell, and rerun:
+  winget install --id Python.Python.3.12 -e --source winget
+"@
+    }
+
+    Write-Ok "Using $($bootstrap.Command) $($bootstrap.PrefixArgs -join ' ') (Python $($bootstrap.Version), $($bootstrap.Source))"
+
     Write-Step "Creating isolated local GUI virtual environment"
-    $created = $false
-
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3.11 -c "import sys; print(sys.version)" *> $null
-        if ($LASTEXITCODE -eq 0) {
-            & py -3.11 -m venv $VenvDir
-            $created = ($LASTEXITCODE -eq 0)
-        }
-        if (-not $created) {
-            & py -3.12 -c "import sys; print(sys.version)" *> $null
-            if ($LASTEXITCODE -eq 0) {
-                & py -3.12 -m venv $VenvDir
-                $created = ($LASTEXITCODE -eq 0)
-            }
-        }
+    try {
+        & $bootstrap.Command @($bootstrap.PrefixArgs) -m venv $VenvDir
+    }
+    catch {
+        Fail "Failed to create .venv_local using Python $($bootstrap.Version): $($_.Exception.Message)"
     }
 
-    if (-not $created -and (Get-Command python -ErrorAction SilentlyContinue)) {
-        & python -c "import sys; assert sys.version_info >= (3,11), sys.version" *> $null
-        if ($LASTEXITCODE -eq 0) {
-            & python -m venv $VenvDir
-            $created = ($LASTEXITCODE -eq 0)
-        }
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) {
+        Fail "Python was found, but creating .venv_local failed. Try: python -m venv .venv_local"
     }
-
-    if (-not $created -or -not (Test-Path $VenvPython)) {
-        Fail "Python 3.11+ is required. Install Python 3.11/3.12 and rerun."
+}
+else {
+    $localVersion = Test-PythonVersion -Command $VenvPython
+    if (-not $localVersion) {
+        Fail ".venv_local exists but its Python runtime is invalid or older than 3.11. Delete .venv_local and rerun."
     }
+    Write-Ok "Reusing .venv_local (Python $localVersion)"
 }
 
 if (-not $SkipInstall) {
@@ -80,7 +180,7 @@ if (-not $SkipInstall) {
     if ($LASTEXITCODE -ne 0) { Fail "pip upgrade failed." }
 
     if (-not (Test-Path "requirements-local-gui.txt")) {
-        Fail "requirements-local-gui.txt is missing. Use the patched repository supplied with deploy_locally.ps1."
+        Fail "requirements-local-gui.txt is missing. Use the cleaned repository supplied with deploy_locally.ps1."
     }
     & $VenvPython -m pip install -r requirements-local-gui.txt
     if ($LASTEXITCODE -ne 0) { Fail "Dependency installation failed." }
@@ -162,17 +262,129 @@ if ($RunSmokeTests) {
 
 Write-Step "Launching multimodal GUI on http://127.0.0.1:$Port"
 Write-Host "The GUI calls build_phase6() directly and is the supported local multimodal entrypoint." -ForegroundColor DarkGray
-Write-Host "Press Ctrl+C in this terminal to stop the GUI." -ForegroundColor DarkGray
 
-$Headless = if ($NoBrowser) { "true" } else { "false" }
+# Refuse to start on an occupied port rather than launching a second process that
+# immediately exits and leaves the browser showing ERR_CONNECTION_REFUSED.
+$existingListener = $null
+try {
+    $existingListener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+catch {
+    # Get-NetTCPConnection is unavailable on some older Windows builds; the
+    # Streamlit health probe below remains authoritative.
+}
+if ($existingListener) {
+    Fail "Port $Port is already in use by PID $($existingListener.OwningProcess). Choose another port, e.g. .\deploy_locally.ps1 -Port 8502"
+}
+
+$RuntimeLogDir = Join-Path $RepoRoot ".runtime_logs"
+New-Item -ItemType Directory -Path $RuntimeLogDir -Force | Out-Null
+$StdoutLog = Join-Path $RuntimeLogDir "streamlit.stdout.log"
+$StderrLog = Join-Path $RuntimeLogDir "streamlit.stderr.log"
+Remove-Item $StdoutLog, $StderrLog -Force -ErrorAction SilentlyContinue
+
 $StreamlitArgs = @(
     "-m", "streamlit", "run", "app/local_gui.py",
     "--server.address", "127.0.0.1",
     "--server.port", "$Port",
-    "--server.headless", $Headless,
+    "--server.headless", "true",
     "--server.maxUploadSize", "100",
     "--browser.gatherUsageStats", "false"
 )
 
-& $VenvPython @StreamlitArgs
-exit $LASTEXITCODE
+try {
+    $GuiProcess = Start-Process `
+        -FilePath $VenvPython `
+        -ArgumentList $StreamlitArgs `
+        -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $StdoutLog `
+        -RedirectStandardError $StderrLog `
+        -PassThru `
+        -WindowStyle Hidden
+}
+catch {
+    Fail "Failed to start Streamlit: $($_.Exception.Message)"
+}
+
+$HealthUrl = "http://127.0.0.1:$Port/_stcore/health"
+$GuiUrl = "http://127.0.0.1:$Port"
+$Ready = $false
+$StartupDeadline = (Get-Date).AddSeconds(45)
+
+Write-Host "Waiting for Streamlit health endpoint..." -ForegroundColor DarkGray
+while ((Get-Date) -lt $StartupDeadline) {
+    if ($GuiProcess.HasExited) {
+        break
+    }
+
+    try {
+        $health = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        if ($health.StatusCode -eq 200) {
+            $Ready = $true
+            break
+        }
+    }
+    catch {
+        Start-Sleep -Milliseconds 750
+    }
+}
+
+if (-not $Ready) {
+    Write-Host "`n[ERROR] Streamlit did not become reachable on $GuiUrl" -ForegroundColor Red
+    if ($GuiProcess.HasExited) {
+        Write-Host "Process exited with code $($GuiProcess.ExitCode)." -ForegroundColor Red
+    }
+    else {
+        Write-Host "Process is still running but the health endpoint is not responding." -ForegroundColor Yellow
+    }
+
+    if (Test-Path $StderrLog) {
+        $stderrText = Get-Content $StderrLog -Raw -ErrorAction SilentlyContinue
+        if ($stderrText) {
+            Write-Host "`n--- Streamlit stderr ---" -ForegroundColor Yellow
+            Write-Host $stderrText
+        }
+    }
+    if (Test-Path $StdoutLog) {
+        $stdoutText = Get-Content $StdoutLog -Raw -ErrorAction SilentlyContinue
+        if ($stdoutText) {
+            Write-Host "`n--- Streamlit stdout ---" -ForegroundColor Yellow
+            Write-Host $stdoutText
+        }
+    }
+
+    Write-Host "`nLogs:" -ForegroundColor Yellow
+    Write-Host "  $StdoutLog"
+    Write-Host "  $StderrLog"
+
+    if (-not $GuiProcess.HasExited) {
+        try { Stop-Process -Id $GuiProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    exit 1
+}
+
+Write-Ok "Multimodal GUI is healthy"
+Write-Host "URL:  $GuiUrl" -ForegroundColor Green
+Write-Host "PID:  $($GuiProcess.Id)" -ForegroundColor DarkGray
+Write-Host "Logs: $RuntimeLogDir" -ForegroundColor DarkGray
+Write-Host "Press Ctrl+C here to stop the GUI." -ForegroundColor DarkGray
+
+if (-not $NoBrowser) {
+    try {
+        Start-Process $GuiUrl | Out-Null
+    }
+    catch {
+        Write-Warn "Could not open the browser automatically. Open $GuiUrl manually."
+    }
+}
+
+try {
+    Wait-Process -Id $GuiProcess.Id
+}
+finally {
+    if (-not $GuiProcess.HasExited) {
+        Stop-Process -Id $GuiProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
+exit $GuiProcess.ExitCode

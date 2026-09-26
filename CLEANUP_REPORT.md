@@ -41,3 +41,7 @@ The Phase 3/4/5 modules and graph helpers remain because the Phase 6 graph impor
 - PPTX uses python-pptx for text/tables/chart data and sends embedded pictures to the VLM.
 - VLM inference supports ordered fallback models when HF reports model/provider unavailability.
 - Live Hugging Face quota and provider availability can still change at runtime.
+
+## Windows launcher hardening
+
+`deploy_locally.ps1` now selects Python in this order: active virtual environment, `python`/`python3` on PATH, then the Windows `py` launcher. Missing `py -3.11` or `py -3.12` registrations are treated as ordinary probe failures and can no longer terminate the deployment script under `$ErrorActionPreference = "Stop"`.

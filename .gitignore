@@ -180,3 +180,6 @@ eval_reports/
 .venv_local/
 .local_gui_uploads/
 .streamlit/cache/
+
+# Local GUI logs
+.runtime_logs/
