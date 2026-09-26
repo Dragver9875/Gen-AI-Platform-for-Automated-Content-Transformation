@@ -37,7 +37,7 @@ An artifact passes only if it meets `PHASE5_MIN_FAITHFULNESS_SCORE` and contains
 
 ## Provider behavior
 
-If `VERIFIER_API_URL` is omitted, Phase 5 reuses the Phase 4 hosted LLM for verification. A separate verifier endpoint can be configured without changing the graph. Repair uses the main Phase 4 LLM so repaired output follows the same CRR schema and transformation instructions.
+Phase 5 intentionally reuses the same `gpt-oss-20b` provider used by Phase 4 for verification and bounded repair. There is no separate verifier endpoint/model in the simplified runtime, preventing generator/verifier configuration drift.
 
 ## Deterministic checks
 

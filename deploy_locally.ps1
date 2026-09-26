@@ -242,7 +242,7 @@ if missing:
     raise SystemExit(3)
 print('Core configuration: OK')
 print('Session backend:', os.environ.get('SESSION_STORE_BACKEND', 'memory'))
-print('Creative image output:', 'enabled' if os.environ.get('IMAGE_GEN_API_URL', '').strip() else 'disabled (IMAGE_GEN_API_URL empty)')
+print('Creative image output:', 'enabled via HF_TOKEN / FLUX' if os.environ.get('HF_TOKEN', '').strip() else 'disabled')
 print('Neural reranker:', 'enabled' if os.environ.get('RERANKER_API_URL', '').strip() else 'disabled (RRF fallback)')
 '@
 & $VenvPython -c $Preflight
@@ -256,7 +256,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Python compile check failed." }
 
 if ($RunSmokeTests) {
     Write-Step "Running focused multimodal regression tests"
-    & $VenvPython -m pytest -q tests/test_phase2_ingestion.py tests/test_hf_vlm_reranker.py tests/test_phase6_artifacts.py
+    & $VenvPython -m pytest -q tests/test_phase2_ingestion.py tests/test_hf_token_config.py tests/test_hf_vlm_reranker.py tests/test_phase6_artifacts.py
     if ($LASTEXITCODE -ne 0) { Fail "Smoke tests failed. Fix the test failures before benchmarking live providers." }
 }
 

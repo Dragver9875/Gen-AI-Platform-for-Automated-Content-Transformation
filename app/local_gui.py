@@ -89,13 +89,13 @@ def _clean_state_for_debug(state: dict[str, Any]) -> dict[str, Any]:
 
 def _settings_summary(settings: Settings) -> list[dict[str, str]]:
     return [
+        {"Capability": "Shared multimodal encoder", "Provider / model": f"HF · {settings.multimodal_model}", "Configured": "yes"},
         {"Capability": "Embeddings", "Provider / model": f"HF · {settings.harrier_model}", "Configured": "yes"},
-        {"Capability": "Document parsing", "Provider / model": "PyMuPDF + python-pptx", "Configured": "yes"},
-        {"Capability": "Visual routing", "Provider / model": (f"HF SigLIP · {settings.siglip_model}" if settings.siglip_enabled else "VLM router + document precheck"), "Configured": "yes"},
-        {"Capability": "Visual understanding", "Provider / model": f"HF · {settings.vlm_model} (fallbacks: {', '.join(settings.vlm_fallback_models) or 'none'})", "Configured": "yes"},
-        {"Capability": "Generation / verifier", "Provider / model": f"HF · {settings.llm_model}", "Configured": "yes" if settings.llm_api_url else "no"},
-        {"Capability": "Reranker", "Provider / model": settings.reranker_model, "Configured": "yes" if settings.reranker_api_url else "no (RRF only)"},
-        {"Capability": "Creative image", "Provider / model": settings.image_gen_model or "—", "Configured": "yes" if settings.image_gen_api_url else "no"},
+        {"Capability": "Generation / verification / repair", "Provider / model": f"HF · {settings.llm_model}", "Configured": "yes" if settings.llm_api_url else "no"},
+        {"Capability": "Reranker", "Provider / model": settings.reranker_model, "Configured": "yes" if settings.reranker_api_url else "no (BM25 + Harrier + RRF)"},
+        {"Capability": "Creative image decoder", "Provider / model": f"HF · {settings.image_gen_model}", "Configured": "yes" if settings.image_gen_api_key else "no"},
+        {"Capability": "PDF renderer", "Provider / model": f"PyMuPDF → Qwen2.5-VL @ {settings.multimodal_render_dpi} DPI", "Configured": "yes"},
+        {"Capability": "PPTX renderer", "Provider / model": "python-pptx + Pillow → Qwen2.5-VL", "Configured": "yes"},
         {"Capability": "Session store", "Provider / model": settings.session_store_backend, "Configured": "yes"},
     ]
 
@@ -108,7 +108,7 @@ def _build_agent_cached():
 
 st.set_page_config(page_title="OmniTransform Multimodal Lab", page_icon="🧪", layout="wide")
 st.title("OmniTransform Multimodal Lab")
-st.caption("Local GUI for exercising the real Phase 6 LangGraph pipeline — ingestion, routing, retrieval, generation, verification, and artifact creation.")
+st.caption("Local GUI for the real Phase 6 pipeline — Qwen2.5-VL multimodal encoding, Harrier retrieval, gpt-oss-20b generation/verification, and artifact creation.")
 
 try:
     settings_preview = Settings.from_env()
@@ -127,7 +127,7 @@ with st.sidebar:
     artifact_type = st.text_input("Artifact type", value="executive_summary")
 
     format_options = ["text", "pdf", "pptx", "svg"]
-    if settings_preview.image_gen_api_url:
+    if settings_preview.image_gen_api_key:
         format_options.append("image")
     output_formats = st.multiselect("Output formats", format_options, default=["text"])
 
@@ -143,8 +143,8 @@ with st.sidebar:
     st.dataframe(_settings_summary(settings_preview), hide_index=True, use_container_width=True)
     if not settings_preview.reranker_api_url:
         st.caption("Reranker endpoint is not configured; retrieval will use BM25 + Harrier + RRF without neural reranking.")
-    if not settings_preview.image_gen_api_url:
-        st.caption("Creative image output is disabled because IMAGE_GEN_API_URL is empty.")
+    if not settings_preview.image_gen_api_key:
+        st.caption("Creative image output is disabled because no HF/image-generation credential is available.")
 
 left, right = st.columns([1.1, 0.9], gap="large")
 
@@ -259,7 +259,7 @@ if state and perf:
     with tab_ingest:
         if ingested:
             st.dataframe(ingested, hide_index=True, use_container_width=True)
-            st.caption("Check `strategy` to confirm image VLM routing and whether a PDF was classified native/scanned/mixed. Native PDFs should report PyMuPDF parsing with zero VLM page calls.")
+            st.caption("Every image, PDF page, and PPTX slide should report a `qwen2.5-vl-*` strategy. TXT/MD are the only direct-ingestion exception.")
         else:
             st.warning("No ingested source metadata was returned.")
         if state.get("retrieval_mode"):

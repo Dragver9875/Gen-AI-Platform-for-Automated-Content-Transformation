@@ -10,10 +10,7 @@
   "harrier": {
     "per_request": 0.0
   },
-  "vlm": {
-    "per_request": 0.0
-  },
-  "siglip": {
+  "qwen_vl": {
     "per_request": 0.0
   }
 }

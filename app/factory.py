@@ -21,14 +21,12 @@ from artifacts.service import ArtifactService
 from database.chroma import ChromaCloudStore
 from generation.service import GenerationService
 from ingestion.chunker import StructureAwareChunker
-from ingestion.preflight import PdfPreflight
 from ingestion.router import IngestionRouter
 from providers.harrier import HarrierEmbeddingProvider
 from providers.image_generation import HostedImageGenerationProvider
 from providers.llm import HostedLLMProvider
 from providers.registry import ProviderCapability, ProviderRegistry
 from providers.reranker import HostedReranker
-from providers.siglip import SigLIPRoutingProvider
 from providers.vlm import VLMProvider
 from retrieval.config import RetrievalConfig
 from retrieval.hybrid_retrieval import HybridRetriever
@@ -36,33 +34,29 @@ from verification.profiles import VerificationProfileRegistry
 from verification.service import VerificationService
 
 
-def build_provider_registry(settings: Settings, *, include_generation: bool = False, include_image_generation: bool = False) -> ProviderRegistry:
+def build_provider_registry(
+    settings: Settings,
+    *,
+    include_generation: bool = False,
+    include_image_generation: bool = False,
+) -> ProviderRegistry:
     registry = ProviderRegistry()
-    if settings.siglip_enabled:
-        registry.register(
-            ProviderCapability.VISUAL_ROUTING,
-            SigLIPRoutingProvider(
-                settings.siglip_api_key,
-                model=settings.siglip_model,
-                api_url=settings.siglip_api_url,
-                timeout_s=settings.http_timeout_s,
-                retries=settings.http_retries,
-            ),
-            name="siglip",
-        )
+
+    # One shared multimodal understanding model for images, PDF pages and PPTX slides.
     registry.register(
         ProviderCapability.VISUAL_UNDERSTANDING,
         VLMProvider(
-            settings.vlm_api_url,
-            settings.vlm_api_key,
-            model=settings.vlm_model,
-            fallback_models=settings.vlm_fallback_models,
-            api_style=settings.vlm_api_style,
+            settings.multimodal_api_url,
+            settings.multimodal_api_key,
+            model=settings.multimodal_model,
+            api_style=settings.multimodal_api_style,
             timeout_s=settings.http_timeout_s,
             retries=settings.http_retries,
+            max_tokens=settings.multimodal_max_tokens,
         ),
-        name="vlm",
+        name="qwen2.5-vl",
     )
+
     registry.register(
         ProviderCapability.EMBEDDING,
         HarrierEmbeddingProvider(
@@ -79,6 +73,7 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
         ),
         name="harrier",
     )
+
     if settings.reranker_api_url:
         registry.register(
             ProviderCapability.RERANKING,
@@ -91,9 +86,10 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
             ),
             name="hosted",
         )
+
     if include_generation:
         if not settings.llm_api_url or not settings.llm_api_key:
-            raise ValueError("LLM_API_URL and LLM_API_KEY are required for generation phases")
+            raise ValueError("HF_TOKEN or explicit LLM_API_URL/LLM_API_KEY is required for generation phases")
         llm = HostedLLMProvider(
             settings.llm_api_url,
             settings.llm_api_key,
@@ -103,24 +99,12 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
             timeout_s=settings.http_timeout_s,
             retries=settings.http_retries,
         )
-        registry.register(ProviderCapability.STRUCTURED_GENERATION, llm, name="primary")
-        registry.register(ProviderCapability.VERIFICATION, llm, name="primary")
-        if settings.verifier_api_url:
-            registry.register(
-                ProviderCapability.VERIFICATION,
-                HostedLLMProvider(
-                    settings.verifier_api_url,
-                    settings.verifier_api_key or settings.hf_token or settings.llm_api_key or "",
-                    api_style=settings.verifier_api_style,
-                    model=settings.verifier_model,
-                    response_mode=settings.verifier_response_mode,
-                    timeout_s=settings.http_timeout_s,
-                    retries=settings.http_retries,
-                ),
-                name="verifier",
-                default=True,
-            )
-    if include_image_generation and settings.image_gen_api_url and settings.image_gen_api_key:
+        # gpt-oss-20b is intentionally the single semantic decoder for generation,
+        # verification, repair and artifact planning.
+        registry.register(ProviderCapability.STRUCTURED_GENERATION, llm, name="gpt-oss-20b")
+        registry.register(ProviderCapability.VERIFICATION, llm, name="gpt-oss-20b")
+
+    if include_image_generation and settings.image_gen_model and settings.image_gen_api_key:
         registry.register(
             ProviderCapability.IMAGE_GENERATION,
             HostedImageGenerationProvider(
@@ -128,32 +112,29 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
                 settings.image_gen_api_key,
                 model=settings.image_gen_model,
                 api_style=settings.image_gen_api_style,
+                provider=settings.image_gen_provider,
                 timeout_s=max(settings.http_timeout_s, 180.0),
                 retries=settings.http_retries,
             ),
-            name="hosted",
+            name="flux",
         )
+
     return registry
 
 
 def build_phase12(settings: Settings, *, providers: ProviderRegistry | None = None):
     providers = providers or build_provider_registry(settings)
-    siglip = providers.resolve(ProviderCapability.VISUAL_ROUTING, required=False)
     vlm = providers.resolve(ProviderCapability.VISUAL_UNDERSTANDING)
     embedder = providers.resolve(ProviderCapability.EMBEDDING)
     reranker = providers.resolve(ProviderCapability.RERANKING, required=False)
 
     router = IngestionRouter(
-        siglip=siglip,
         vlm=vlm,
-        pdf_preflight=PdfPreflight(
-            native_text_chars=settings.pdf_native_text_chars,
-            image_coverage_threshold=settings.pdf_image_coverage_threshold,
-        ),
-        enable_pdf_visual_fallback=settings.pdf_visual_fallback_enabled,
-        pdf_visual_fallback_max_pages=settings.pdf_visual_fallback_max_pages,
-        document_like_image_labels=set(settings.siglip_document_labels),
-        pdf_visual_prompt=settings.pdf_visual_prompt,
+        render_dpi=settings.multimodal_render_dpi,
+        max_pdf_pages=settings.multimodal_max_pdf_pages,
+        max_pptx_slides=settings.multimodal_max_pptx_slides,
+        document_prompt=settings.multimodal_document_prompt,
+        image_prompt=settings.multimodal_image_prompt,
     )
     chunker = StructureAwareChunker(
         target_chars=settings.chunk_target_chars,
@@ -200,15 +181,14 @@ def _build_generation_service(settings: Settings, providers: ProviderRegistry) -
 
 
 def _build_verification_service(settings: Settings, providers: ProviderRegistry) -> VerificationService:
-    generator = providers.resolve(ProviderCapability.STRUCTURED_GENERATION)
-    verifier_provider = providers.resolve(ProviderCapability.VERIFICATION)
+    llm = providers.resolve(ProviderCapability.STRUCTURED_GENERATION)
     profile_registry = VerificationProfileRegistry.from_json(
         settings.phase5_verification_profiles_json,
         default_profile=settings.phase5_default_verification_profile,
     )
     return VerificationService(
-        verifier_provider,
-        repair_generator=generator,
+        llm,
+        repair_generator=llm,
         verification_temperature=settings.phase5_verification_temperature,
         verification_max_tokens=settings.phase5_verification_max_tokens,
         repair_temperature=settings.phase5_repair_temperature,
@@ -225,7 +205,9 @@ def build_artifact_service(settings: Settings, providers: ProviderRegistry) -> A
     llm = providers.resolve(ProviderCapability.STRUCTURED_GENERATION)
     image_provider = providers.resolve(ProviderCapability.IMAGE_GENERATION, required=False)
     registry = ArtifactRegistry()
-    registry.register_generator("text", TextArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens))
+    registry.register_generator(
+        "text", TextArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens)
+    )
     registry.register_generator(
         "pdf",
         PDFArtifactGenerator(
@@ -236,9 +218,18 @@ def build_artifact_service(settings: Settings, providers: ProviderRegistry) -> A
             retain_source=settings.phase6_retain_typst_source,
         ),
     )
-    registry.register_generator("pptx", PPTXArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens))
-    registry.register_generator("svg", SVGArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens))
-    registry.register_generator("creative_image", CreativeImageArtifactGenerator(llm, image_provider, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens))
+    registry.register_generator(
+        "pptx", PPTXArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens)
+    )
+    registry.register_generator(
+        "svg", SVGArtifactGenerator(llm, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens)
+    )
+    registry.register_generator(
+        "creative_image",
+        CreativeImageArtifactGenerator(
+            llm, image_provider, temperature=settings.phase6_temperature, max_tokens=settings.phase6_max_tokens
+        ),
+    )
     spec_path = Path(settings.phase6_artifact_specs_path)
     if not spec_path.is_absolute():
         spec_path = Path(__file__).resolve().parents[1] / spec_path

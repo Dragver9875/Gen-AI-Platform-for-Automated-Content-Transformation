@@ -5,7 +5,6 @@ from typing import Any
 
 
 class ProviderCapability:
-    VISUAL_ROUTING = "visual_routing"
     VISUAL_UNDERSTANDING = "visual_understanding"
     EMBEDDING = "embedding"
     RERANKING = "reranking"

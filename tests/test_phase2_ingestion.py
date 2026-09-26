@@ -1,202 +1,164 @@
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 
 import pymupdf
 from pptx import Presentation
 
-from app.schemas import IngestionResult, SourceElement
 from ingestion.chunker import StructureAwareChunker
-from ingestion.preflight import PdfPreflight
 from ingestion.router import IngestionRouter
 
 
-class FakeSiglip:
-    def __init__(self, label="photograph"):
-        self.label = label
-
-    def classify(self, path):
-        return [{"label": self.label, "score": 0.99}]
-
-
 class FakeVLM:
+    model = "Qwen/Qwen2.5-VL-3B-Instruct"
+
     def __init__(self):
         self.byte_calls = 0
         self.file_calls = 0
+        self.last_model_used = self.model
+        self.prompts: list[str] = []
 
     def describe_file(self, path, prompt=None):
         self.file_calls += 1
-        if prompt and "Transcribe" in prompt:
-            return "Incident advisory: road closed until 18:00."
-        return "A rescue vehicle beside flood water."
+        self.prompts.append(prompt or "")
+        return "Visible image content with label 42."
 
     def describe_bytes(self, data, prompt=None, *, media_type=None):
         self.byte_calls += 1
-        return "Scanned page containing an incident advisory."
-
-    def classify_file(self, path, labels):
-        return [{"label": "photograph", "score": 1.0}]
+        self.prompts.append(prompt or "")
+        return "# Encoded page\n\nProject finished today. Metric: 42."
 
 
-_DEFAULT_SIGLIP = object()
-
-def make_router(*, siglip=_DEFAULT_SIGLIP, vlm=None):
+def make_router(*, vlm=None, max_pdf_pages=40, max_pptx_slides=40):
     return IngestionRouter(
-        siglip=FakeSiglip() if siglip is _DEFAULT_SIGLIP else siglip,
         vlm=vlm or FakeVLM(),
-        pdf_preflight=PdfPreflight(native_text_chars=40, image_coverage_threshold=0.7),
+        render_dpi=96,
+        max_pdf_pages=max_pdf_pages,
+        max_pptx_slides=max_pptx_slides,
     )
 
 
-def test_text_ingestion_and_chunking(tmp_path: Path):
+def test_text_ingestion_stays_direct(tmp_path: Path):
+    file = tmp_path / "source.txt"
+    file.write_text("Alpha beta gamma", encoding="utf-8")
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(file)
+    assert result.strategy == "text-direct"
+    assert result.text == "Alpha beta gamma"
+    assert vlm.byte_calls == 0
+    assert vlm.file_calls == 0
+
+
+def test_text_chunking_preserves_tenant_metadata(tmp_path: Path):
     file = tmp_path / "source.txt"
     file.write_text("Alpha beta gamma", encoding="utf-8")
     result = make_router().ingest(file)
-    assert result.strategy == "text-direct"
-    chunks = StructureAwareChunker(target_chars=100, overlap_chars=0).chunk(result, user_id="u1", session_id="s1")
+    chunks = StructureAwareChunker(target_chars=100, overlap_chars=0).chunk(
+        result, user_id="u1", session_id="s1"
+    )
     assert len(chunks) == 1
     assert chunks[0].metadata["user_id"] == "u1"
     assert chunks[0].metadata["session_id"] == "s1"
 
 
-def test_image_routes_to_vlm(tmp_path: Path):
-    file = tmp_path / "image.png"
-    file.write_bytes(b"not-a-real-png-needed-for-mock")
-    result = make_router(siglip=FakeSiglip("photograph")).ingest(file)
-    assert result.strategy.startswith("image-visual:photograph")
-    assert "flood water" in result.text
+def test_every_image_goes_directly_through_shared_qwen_encoder(tmp_path: Path):
+    file = tmp_path / "photo.jpeg"
+    file.write_bytes(b"fake-image-bytes")
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(file)
+    assert result.strategy == "qwen2.5-vl-image"
+    assert vlm.file_calls == 1
+    assert result.provider_metadata["shared_encoder"] == vlm.model
+    assert "label 42" in result.text
 
 
-def test_document_like_image_routes_to_vlm_document_prompt(tmp_path: Path):
-    file = tmp_path / "scan.png"
-    file.write_bytes(b"mock")
-    result = make_router(siglip=FakeSiglip("document page")).ingest(file)
-    assert result.strategy.startswith("image-document:document page")
-    assert "road closed" in result.text
+def test_document_page_image_uses_same_shared_encoder_no_router(tmp_path: Path):
+    file = tmp_path / "pdf2photo.jpeg"
+    file.write_bytes(b"fake-document-image")
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(file)
+    assert result.strategy == "qwen2.5-vl-image"
+    assert vlm.file_calls == 1
+    assert "scanned document page" in vlm.prompts[0]
 
 
-def test_pdf_preflight_detects_full_page_image(tmp_path: Path):
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
-    pdf_path = tmp_path / "scan.pdf"
-    doc = pymupdf.open()
-    page = doc.new_page(width=600, height=800)
-    page.insert_image(page.rect, stream=png)
-    doc.save(pdf_path)
-    doc.close()
-
-    profile = PdfPreflight(native_text_chars=80, image_coverage_threshold=0.7).inspect(pdf_path)
-    assert profile.strategy == "image-only/scanned"
-    assert profile.pages[0].kind == "scanned"
-
-
-def test_native_pdf_uses_local_text_without_vlm(tmp_path: Path):
+def test_native_pdf_also_goes_through_qwen_per_page(tmp_path: Path):
     pdf_path = tmp_path / "native.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
-    page.insert_text((72, 72), "This is a native PDF paragraph with enough searchable text to exceed the threshold and remain local.")
+    page.insert_text((72, 72), "Native searchable PDF text.")
     doc.save(pdf_path)
     doc.close()
 
     vlm = FakeVLM()
     result = make_router(vlm=vlm).ingest(pdf_path)
-    assert result.strategy == "pdf-native-text"
-    assert "native PDF paragraph" in result.text
-    assert vlm.byte_calls == 0
-    assert result.provider_metadata["document_parser"] == "pymupdf+vlm"
-    assert result.provider_metadata["vlm_pages"] == 0
-
-
-def test_scanned_pdf_uses_vlm_page_analysis(tmp_path: Path):
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
-    pdf_path = tmp_path / "scan.pdf"
-    doc = pymupdf.open()
-    page = doc.new_page(width=600, height=800)
-    page.insert_image(page.rect, stream=png)
-    doc.save(pdf_path)
-    doc.close()
-
-    vlm = FakeVLM()
-    result = make_router(vlm=vlm).ingest(pdf_path)
-    assert result.strategy == "pdf-image-only/scanned"
-    assert "incident advisory" in result.text
+    assert result.strategy == "qwen2.5-vl-pdf"
     assert vlm.byte_calls == 1
-    assert result.provider_metadata["vlm_pages"] == 1
+    assert result.provider_metadata["pages_encoded"] == 1
+    assert result.provider_metadata["shared_encoder"] == vlm.model
+    assert "Project finished today" in result.text
 
 
-def test_pptx_extracts_text_locally(tmp_path: Path):
+def test_multipage_pdf_calls_qwen_for_each_page(tmp_path: Path):
+    pdf_path = tmp_path / "multi.pdf"
+    doc = pymupdf.open()
+    for i in range(3):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"Page {i+1}")
+    doc.save(pdf_path)
+    doc.close()
+
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm).ingest(pdf_path)
+    assert vlm.byte_calls == 3
+    assert len(result.elements) == 3
+    assert [e.page for e in result.elements] == [1, 2, 3]
+
+
+def test_pdf_page_cap_is_visible_not_silent(tmp_path: Path):
+    pdf_path = tmp_path / "long.pdf"
+    doc = pymupdf.open()
+    for i in range(3):
+        doc.new_page().insert_text((72, 72), f"Page {i+1}")
+    doc.save(pdf_path)
+    doc.close()
+
+    vlm = FakeVLM()
+    result = make_router(vlm=vlm, max_pdf_pages=2).ingest(pdf_path)
+    assert vlm.byte_calls == 2
+    assert result.provider_metadata["total_pages"] == 3
+    assert any("capped at 2" in warning for warning in result.warnings)
+
+
+def test_every_pptx_slide_is_rasterized_then_encoded_by_qwen(tmp_path: Path):
     path = tmp_path / "deck.pptx"
     prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[1])
-    slide.shapes.title.text = "Quarterly Update"
-    slide.placeholders[1].text = "Project finished today."
+    for title in ("Quarterly Update", "Next Steps"):
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = title
+        slide.placeholders[1].text = "Project finished today."
     prs.save(path)
 
     vlm = FakeVLM()
     result = make_router(vlm=vlm).ingest(path)
-    assert result.strategy == "pptx-native+visual"
-    assert "Quarterly Update" in result.text
-    assert "Project finished today." in result.text
-    assert vlm.byte_calls == 0
+    assert result.strategy == "qwen2.5-vl-pptx"
+    assert vlm.byte_calls == 2
+    assert result.provider_metadata["slides_encoded"] == 2
+    assert result.provider_metadata["slide_renderer"] == "python-pptx+pillow"
+    assert [e.slide for e in result.elements] == [1, 2]
 
 
-def test_image_falls_back_to_vlm_routing_when_siglip_unavailable(tmp_path: Path):
-    class BrokenSiglip:
-        def classify(self, path):
-            raise RuntimeError("provider unavailable")
-
-    image = tmp_path / "photo.png"
-    image.write_bytes(b"fake-image")
-    result = make_router(siglip=BrokenSiglip()).ingest(image)
-    assert result.strategy.startswith("image-")
-    assert result.provider_metadata["routing_source"] == "vlm_fallback"
-    assert any("SigLIP routing unavailable" in warning for warning in result.warnings)
-
-
-def test_pdf_page_photo_filename_precheck_routes_as_document(tmp_path: Path):
-    # Real white page-like image with dark text-like strokes. The filename mirrors
-    # the user's failing case and should bypass generic-image routing.
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 700, 1000), 0)
-    pix.clear_with(255)
-    path = tmp_path / "pdf2photo.jpeg"
-    pix.save(path)
+def test_pptx_slide_cap_is_visible(tmp_path: Path):
+    path = tmp_path / "deck.pptx"
+    prs = Presentation()
+    for i in range(3):
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = f"Slide {i+1}"
+        slide.placeholders[1].text = "Body"
+    prs.save(path)
 
     vlm = FakeVLM()
-    result = make_router(siglip=FakeSiglip("photograph"), vlm=vlm).ingest(path)
-
-    assert result.strategy.startswith("image-document:document page")
-    assert result.provider_metadata["routing_source"] == "document_precheck"
-    assert result.provider_metadata["document_precheck"]["is_document_like"] is True
-    assert "road closed" in result.text
-
-
-def test_generic_filename_page_photo_detected_from_layout(tmp_path: Path):
-    path = tmp_path / "IMG_0001.jpeg"
-    doc = pymupdf.open()
-    page = doc.new_page(width=595, height=842)
-    for index in range(30):
-        page.insert_text(
-            (50, 60 + index * 22),
-            f"Sample report line {index}: project status and metric 12345.",
-            fontsize=11,
-        )
-    pix = page.get_pixmap(matrix=pymupdf.Matrix(1.2, 1.2), alpha=False)
-    pix.save(path)
-    doc.close()
-
-    result = make_router(siglip=FakeSiglip("photograph"), vlm=FakeVLM()).ingest(path)
-    assert result.strategy.startswith("image-document:document page")
-    assert result.provider_metadata["routing_source"] == "document_precheck"
-
-
-def test_siglip_disabled_routes_with_vlm_without_warning(tmp_path: Path):
-    image = tmp_path / "photo.png"
-    image.write_bytes(b"fake-image")
-    result = make_router(siglip=None, vlm=FakeVLM()).ingest(image)
-    assert result.strategy.startswith("image-visual:photograph")
-    assert result.provider_metadata["routing_source"] == "vlm_router"
-    assert not any("SigLIP" in warning for warning in result.warnings)
+    result = make_router(vlm=vlm, max_pptx_slides=2).ingest(path)
+    assert vlm.byte_calls == 2
+    assert result.provider_metadata["total_slides"] == 3
+    assert any("capped at 2" in warning for warning in result.warnings)

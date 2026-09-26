@@ -37,23 +37,10 @@ def _is_huggingface_url(url: str | None) -> bool:
     if not url:
         return False
     host = (urlparse(url).hostname or "").lower()
-    return (
-        host == "huggingface.co"
-        or host.endswith(".huggingface.co")
-        or host.endswith(".huggingface.cloud")
-    )
-
-
+    return host == "huggingface.co" or host.endswith(".huggingface.co") or host.endswith(".huggingface.cloud")
 
 
 def _clean_endpoint(value: str | None) -> str | None:
-    """Treat common template/example endpoint values as unset.
-
-    Older repository revisions shipped examples such as
-    ``https://your-vlm-endpoint.endpoints.huggingface.cloud``. Calling those
-    values literally produces a confusing provider 404 instead of falling back
-    to the shared HF router.
-    """
     if not value:
         return None
     value = value.strip()
@@ -72,6 +59,7 @@ def _clean_endpoint(value: str | None) -> str | None:
         return None
     return value
 
+
 def _provider_key(
     env_name: str,
     *,
@@ -79,12 +67,6 @@ def _provider_key(
     hf_token: str | None,
     required: bool = False,
 ) -> str | None:
-    """Resolve an endpoint credential safely.
-
-    A shared HF_TOKEN is only reused for Hugging Face-owned router/endpoint URLs.
-    This avoids accidentally forwarding a Hugging Face token to an unrelated
-    third-party URL when a provider-specific key is omitted.
-    """
     explicit = _env(env_name)
     if explicit:
         return explicit
@@ -100,7 +82,7 @@ def _provider_key(
 
 @dataclass(frozen=True)
 class Settings:
-    # Shared Hugging Face credential. Used only for Hugging Face-owned URLs.
+    # Shared credential for all Hugging Face-hosted ML services.
     hf_token: str | None
 
     # Chroma Cloud
@@ -109,7 +91,7 @@ class Settings:
     chroma_database: str
     chroma_collection: str
 
-    # Harrier hosted/serverless endpoint
+    # Harrier embeddings
     harrier_api_url: str
     harrier_api_key: str
     harrier_api_style: str
@@ -119,37 +101,28 @@ class Settings:
     harrier_query_instruction: str
     harrier_batch_size: int
 
-    # Optional hosted reranker endpoint. RRF is used when omitted.
+    # Optional HF-compatible reranker endpoint. RRF is used when omitted.
     reranker_api_url: str | None
     reranker_api_key: str | None
     reranker_api_style: str
     reranker_model: str
 
-    # Optional SigLIP routing. Disabled by default because serverless availability is inconsistent.
-    siglip_enabled: bool
-    siglip_api_url: str | None
-    siglip_api_key: str
-    siglip_model: str
-
-    # Hosted VLM. Defaults to Hugging Face OpenAI-compatible multimodal router.
-    vlm_api_url: str
-    vlm_api_key: str
-    vlm_model: str
-    vlm_fallback_models: tuple[str, ...]
-    vlm_api_style: str
+    # Single shared multimodal encoder: Qwen2.5-VL.
+    multimodal_api_url: str
+    multimodal_api_key: str
+    multimodal_api_style: str
+    multimodal_model: str
+    multimodal_max_tokens: int
+    multimodal_render_dpi: int
+    multimodal_max_pdf_pages: int
+    multimodal_max_pptx_slides: int
+    multimodal_document_prompt: str
+    multimodal_image_prompt: str
 
     # User sessions
     session_store_backend: str
     session_database_url: str | None
     session_table: str
-
-    # Ingestion routing
-    pdf_native_text_chars: int
-    pdf_image_coverage_threshold: float
-    pdf_visual_fallback_enabled: bool
-    pdf_visual_fallback_max_pages: int
-    siglip_document_labels: tuple[str, ...]
-    pdf_visual_prompt: str
 
     # Chunking
     chunk_target_chars: int
@@ -166,7 +139,7 @@ class Settings:
     phase3_default_top_k: int
     phase3_context_max_chars: int
 
-    # Phase 4 hosted open-source LLM + CRR generation
+    # Main semantic decoder: gpt-oss-20b. Reused for generation, verification and repair.
     llm_api_url: str | None
     llm_api_key: str | None
     llm_api_style: str
@@ -178,11 +151,6 @@ class Settings:
     phase4_digest_max_tokens: int
 
     # Phase 5 factuality verification + bounded repair
-    verifier_api_url: str | None
-    verifier_api_key: str | None
-    verifier_api_style: str
-    verifier_model: str | None
-    verifier_response_mode: str
     phase5_verification_temperature: float
     phase5_verification_max_tokens: int
     phase5_repair_temperature: float
@@ -203,11 +171,12 @@ class Settings:
     phase6_temperature: float
     phase6_max_tokens: int
 
-    # Hosted image generation (e.g. FLUX endpoint)
+    # Creative image decoder. Defaults to FLUX.1-schnell via HF InferenceClient.
     image_gen_api_url: str | None
     image_gen_api_key: str | None
     image_gen_api_style: str
     image_gen_model: str | None
+    image_gen_provider: str
 
     # HTTP
     http_timeout_s: float
@@ -222,95 +191,52 @@ class Settings:
             f"https://router.huggingface.co/hf-inference/models/{harrier_model}"
         )
         harrier_api_key = _provider_key(
-            "HARRIER_API_KEY",
-            api_url=harrier_api_url,
-            hf_token=hf_token,
-            required=True,
+            "HARRIER_API_KEY", api_url=harrier_api_url, hf_token=hf_token, required=True
         )
 
-        # All hosted ML services reuse HF_TOKEN on Hugging Face infrastructure.
-        # Native PDF/PPTX parsing is deterministic and does not require a document-model endpoint.
-
-        siglip_enabled = _env_bool("SIGLIP_ENABLED", False)
-        siglip_model = _env("SIGLIP_MODEL", "google/siglip-so400m-patch14-384") or "google/siglip-so400m-patch14-384"
-        siglip_api_url = _clean_endpoint(_env("SIGLIP_API_URL"))
-        if not siglip_enabled:
-            siglip_api_key = _env("SIGLIP_API_KEY") or ""
-        elif siglip_api_url:
-            siglip_api_key = _provider_key(
-                "SIGLIP_API_KEY",
-                api_url=siglip_api_url,
-                hf_token=hf_token,
-                required=True,
-            )
-        else:
-            # The default SigLIP path uses huggingface_hub.InferenceClient directly.
-            # No endpoint URL is required; the Hub selects an available inference provider.
-            siglip_api_key = _env("SIGLIP_API_KEY") or hf_token
-            if not siglip_api_key:
-                raise ConfigurationError("HF_TOKEN is required for default SigLIP inference")
-
-        vlm_model = _env("VLM_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct") or "Qwen/Qwen2.5-VL-3B-Instruct"
-        vlm_fallback_models = tuple(
-            x.strip()
-            for x in (_env("VLM_FALLBACK_MODELS", "zai-org/GLM-4.5V") or "").split(",")
-            if x.strip() and x.strip() != vlm_model
+        # New names are QWEN_VL_*. VLM_* is read only as a compatibility alias
+        # so old .env files do not break during migration.
+        multimodal_model = (
+            _env("QWEN_VL_MODEL")
+            or _env("VLM_MODEL")
+            or "Qwen/Qwen2.5-VL-3B-Instruct"
         )
-        vlm_api_url = _clean_endpoint(_env("VLM_API_URL")) or "https://router.huggingface.co/v1/chat/completions"
-        vlm_api_key = _provider_key(
-            "VLM_API_KEY",
-            api_url=vlm_api_url,
-            hf_token=hf_token,
-            required=True,
+        multimodal_api_url = (
+            _clean_endpoint(_env("QWEN_VL_API_URL"))
+            or _clean_endpoint(_env("VLM_API_URL"))
+            or "https://router.huggingface.co/v1/chat/completions"
         )
-        vlm_api_style = (_env("VLM_API_STYLE", "openai") or "openai").lower()
+        multimodal_api_key = (
+            _env("QWEN_VL_API_KEY")
+            or _provider_key("VLM_API_KEY", api_url=multimodal_api_url, hf_token=hf_token, required=True)
+        )
+        multimodal_api_style = (
+            _env("QWEN_VL_API_STYLE") or _env("VLM_API_STYLE") or "openai"
+        ).lower()
 
         llm_api_url = _clean_endpoint(_env("LLM_API_URL"))
         if not llm_api_url and hf_token:
-            # Hugging Face Inference Providers expose an OpenAI-compatible chat route.
             llm_api_url = "https://router.huggingface.co/v1/chat/completions"
-
-        # Compatibility migration: an earlier repository revision defaulted to a
-        # Qwen3 checkpoint that is not currently router-served by HF Inference
-        # Providers. Preserve explicit custom endpoints, but transparently migrate
-        # that legacy model when using the shared HF router.
         llm_model = _env("LLM_MODEL", "openai/gpt-oss-20b:fastest") or "openai/gpt-oss-20b:fastest"
-        if (
-            llm_model == "Qwen/Qwen3-30B-A3B-Instruct-2507"
-            and _is_huggingface_url(llm_api_url)
-        ):
+        if llm_model == "Qwen/Qwen3-30B-A3B-Instruct-2507" and _is_huggingface_url(llm_api_url):
             llm_model = "openai/gpt-oss-20b:fastest"
-
-        llm_api_key = _provider_key(
-            "LLM_API_KEY",
-            api_url=llm_api_url,
-            hf_token=hf_token,
-            required=False,
-        )
+        llm_api_key = _provider_key("LLM_API_KEY", api_url=llm_api_url, hf_token=hf_token, required=False)
 
         reranker_api_url = _clean_endpoint(_env("RERANKER_API_URL"))
         reranker_api_key = _provider_key(
-            "RERANKER_API_KEY",
-            api_url=reranker_api_url,
-            hf_token=hf_token,
-            required=False,
+            "RERANKER_API_KEY", api_url=reranker_api_url, hf_token=hf_token, required=False
         )
 
-        verifier_api_url = _clean_endpoint(_env("VERIFIER_API_URL"))
-        verifier_api_key = _provider_key(
-            "VERIFIER_API_KEY",
-            api_url=verifier_api_url,
-            hf_token=hf_token,
-            required=False,
-        )
-
+        # Creative image generation defaults to the HF client/provider broker,
+        # so no endpoint URL or separate credential is required.
         image_gen_api_url = _clean_endpoint(_env("IMAGE_GEN_API_URL"))
-        image_gen_api_key = _provider_key(
-            "IMAGE_GEN_API_KEY",
-            api_url=image_gen_api_url,
-            hf_token=hf_token,
-            required=False,
-        )
+        image_gen_api_style = (_env("IMAGE_GEN_API_STYLE", "hf_hub") or "hf_hub").lower()
+        if image_gen_api_style == "hf_hub":
+            image_gen_api_key = _env("IMAGE_GEN_API_KEY") or hf_token
+        else:
+            image_gen_api_key = _provider_key(
+                "IMAGE_GEN_API_KEY", api_url=image_gen_api_url, hf_token=hf_token, required=False
+            )
 
         return cls(
             hf_token=hf_token,
@@ -333,31 +259,32 @@ class Settings:
             reranker_api_key=reranker_api_key,
             reranker_api_style=(_env("RERANKER_API_STYLE", "hf_tei") or "hf_tei").lower(),
             reranker_model=_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3") or "BAAI/bge-reranker-v2-m3",
-            siglip_enabled=siglip_enabled,
-            siglip_api_url=siglip_api_url,
-            siglip_api_key=siglip_api_key or "",
-            siglip_model=siglip_model,
-            vlm_api_url=vlm_api_url,
-            vlm_api_key=vlm_api_key or "",
-            vlm_model=vlm_model,
-            vlm_fallback_models=vlm_fallback_models,
-            vlm_api_style=vlm_api_style,
+            multimodal_api_url=multimodal_api_url,
+            multimodal_api_key=multimodal_api_key or "",
+            multimodal_api_style=multimodal_api_style,
+            multimodal_model=multimodal_model,
+            multimodal_max_tokens=_env_int("QWEN_VL_MAX_TOKENS", 2400),
+            multimodal_render_dpi=_env_int("MULTIMODAL_RENDER_DPI", 144),
+            multimodal_max_pdf_pages=_env_int("MULTIMODAL_MAX_PDF_PAGES", 40),
+            multimodal_max_pptx_slides=_env_int("MULTIMODAL_MAX_PPTX_SLIDES", 40),
+            multimodal_document_prompt=_env(
+                "MULTIMODAL_DOCUMENT_PROMPT",
+                "You are the shared multimodal document encoder for a retrieval system. Read this page or slide faithfully and return retrieval-ready Markdown. Preserve headings, paragraphs, lists, tables, equations, labels, numbers, chart values and trends, diagram relationships, captions, and reading order. Describe meaningful non-text visuals. Do not summarize, omit facts, or invent content.",
+            ) or "",
+            multimodal_image_prompt=_env(
+                "MULTIMODAL_IMAGE_PROMPT",
+                "You are the shared multimodal encoder for a retrieval system. Understand this image faithfully and return retrieval-ready Markdown. Preserve all visible text, entities, numbers, labels, spatial or causal relationships, chart or diagram semantics, and other information needed to answer questions about the image. If the image is a photographed or scanned document page, transcribe it rather than merely describing it. Do not invent details.",
+            ) or "",
             session_store_backend=(_env("SESSION_STORE_BACKEND", "memory") or "memory").lower(),
             session_database_url=_env("SESSION_DATABASE_URL"),
             session_table=_env("SESSION_TABLE", "user_sessions") or "user_sessions",
-            pdf_native_text_chars=_env_int("PDF_NATIVE_TEXT_CHARS", 80),
-            pdf_image_coverage_threshold=_env_float("PDF_IMAGE_COVERAGE_THRESHOLD", 0.72),
-            pdf_visual_fallback_enabled=_env_bool("PDF_VISUAL_FALLBACK_ENABLED", True),
-            pdf_visual_fallback_max_pages=_env_int("PDF_VISUAL_FALLBACK_MAX_PAGES", 12),
-            siglip_document_labels=tuple(x.strip().lower() for x in (_env("SIGLIP_DOCUMENT_LABELS", "document page,screenshot") or "").split(",") if x.strip()),
-            pdf_visual_prompt=_env("PDF_VISUAL_PROMPT", "Describe this PDF page faithfully for retrieval. Preserve all visible text, labels, numbers, chart trends, diagram relationships, and important visual content. If it is primarily a scanned text page, transcribe the meaningful content.") or "",
             chunk_target_chars=_env_int("CHUNK_TARGET_CHARS", 3200),
             chunk_overlap_chars=_env_int("CHUNK_OVERLAP_CHARS", 450),
             retrieval_strategy=(_env("RETRIEVAL_STRATEGY", "hybrid") or "hybrid").lower(),
             retrieval_bm25_k=_env_int("RETRIEVAL_BM25_K", 15),
             retrieval_vector_k=_env_int("RETRIEVAL_VECTOR_K", 15),
             retrieval_rrf_k=_env_int("RETRIEVAL_RRF_K", 60),
-            retrieval_use_reranker=_env_bool("RETRIEVAL_USE_RERANKER", True),
+            retrieval_use_reranker=_env_bool("RETRIEVAL_USE_RERANKER", False),
             phase3_default_top_k=_env_int("PHASE3_DEFAULT_TOP_K", 5),
             phase3_context_max_chars=_env_int("PHASE3_CONTEXT_MAX_CHARS", 60000),
             llm_api_url=llm_api_url,
@@ -369,11 +296,6 @@ class Settings:
             phase4_max_tokens=_env_int("PHASE4_MAX_TOKENS", 4096),
             phase4_group_context_max_chars=_env_int("PHASE4_GROUP_CONTEXT_MAX_CHARS", 18000),
             phase4_digest_max_tokens=_env_int("PHASE4_DIGEST_MAX_TOKENS", 2048),
-            verifier_api_url=verifier_api_url,
-            verifier_api_key=verifier_api_key,
-            verifier_api_style=(_env("VERIFIER_API_STYLE", "openai") or "openai").lower(),
-            verifier_model=_env("VERIFIER_MODEL"),
-            verifier_response_mode=(_env("VERIFIER_RESPONSE_MODE", "json_object") or "json_object").lower(),
             phase5_verification_temperature=_env_float("PHASE5_VERIFICATION_TEMPERATURE", 0.0),
             phase5_verification_max_tokens=_env_int("PHASE5_VERIFICATION_MAX_TOKENS", 4096),
             phase5_repair_temperature=_env_float("PHASE5_REPAIR_TEMPERATURE", 0.05),
@@ -393,8 +315,9 @@ class Settings:
             phase6_max_tokens=_env_int("PHASE6_MAX_TOKENS", 4096),
             image_gen_api_url=image_gen_api_url,
             image_gen_api_key=image_gen_api_key,
-            image_gen_api_style=(_env("IMAGE_GEN_API_STYLE", "hf") or "hf").lower(),
-            image_gen_model=_env("IMAGE_GEN_MODEL"),
-            http_timeout_s=_env_float("HTTP_TIMEOUT_S", 90.0),
+            image_gen_api_style=image_gen_api_style,
+            image_gen_model=_env("IMAGE_GEN_MODEL", "black-forest-labs/FLUX.1-schnell") or "black-forest-labs/FLUX.1-schnell",
+            image_gen_provider=_env("IMAGE_GEN_PROVIDER", "auto") or "auto",
+            http_timeout_s=_env_float("HTTP_TIMEOUT_S", 120.0),
             http_retries=_env_int("HTTP_RETRIES", 2),
         )
