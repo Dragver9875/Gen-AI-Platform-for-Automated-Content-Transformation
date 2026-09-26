@@ -32,7 +32,7 @@ services:
       - key: WEB_MAX_TOTAL_UPLOAD_MB
         value: "100"
       - key: QWEN_VL_MODEL
-        value: Qwen/Qwen2.5-VL-3B-Instruct
+        value: Qwen/Qwen2.5-VL-3B-Instruct:featherless-ai
       - key: LLM_MODEL
         value: openai/gpt-oss-20b:fastest
       - key: IMAGE_GEN_API_STYLE

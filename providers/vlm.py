@@ -20,7 +20,7 @@ class VLMProvider:
         api_url: str,
         api_key: str,
         *,
-        model: str = "Qwen/Qwen2.5-VL-3B-Instruct",
+        model: str = "Qwen/Qwen2.5-VL-3B-Instruct:featherless-ai",
         api_style: str = "openai",
         timeout_s: float = 120.0,
         retries: int = 2,

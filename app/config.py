@@ -228,7 +228,7 @@ class Settings:
         multimodal_model = (
             _env("QWEN_VL_MODEL")
             or _env("VLM_MODEL")
-            or "Qwen/Qwen2.5-VL-3B-Instruct"
+            or "Qwen/Qwen2.5-VL-3B-Instruct:featherless-ai"
         )
         multimodal_api_url = (
             _clean_endpoint(_env("QWEN_VL_API_URL"))
