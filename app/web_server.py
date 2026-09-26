@@ -67,6 +67,20 @@ def _user_id(client_id: str | None) -> str:
     return "web-" + _safe_component(raw, "anonymous")[:80]
 
 
+def _present(*names: str) -> bool:
+    return any(bool((os.getenv(name) or "").strip()) for name in names)
+
+
+def _credential_status() -> dict[str, bool]:
+    # Presence only: never expose credential values to the browser.
+    return {
+        "HF_TOKEN": _present("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN"),
+        "CHROMA_API_KEY": _present("CHROMA_API_KEY", "CHROMA_CLOUD_API_KEY"),
+        "CHROMA_TENANT": _present("CHROMA_TENANT", "CHROMA_CLOUD_TENANT"),
+        "CHROMA_DATABASE": _present("CHROMA_DATABASE", "CHROMA_CLOUD_DATABASE"),
+    }
+
+
 @dataclass
 class JobRecord:
     job_id: str
@@ -305,7 +319,15 @@ def _run_job(job_id: str, source_paths: list[str], request_mode: str, custom_ins
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "omnitransform", "workers": MAX_WORKERS, "runtime_error": runtime.init_error}
+    credentials = _credential_status()
+    return {
+        "ok": True,
+        "service": "omnitransform",
+        "workers": MAX_WORKERS,
+        "runtime_error": runtime.init_error,
+        "credentials_present": credentials,
+        "missing_credentials": [key for key, present in credentials.items() if not present],
+    }
 
 
 @app.get("/api/bootstrap")
@@ -324,9 +346,12 @@ def bootstrap():
         configured = False
         config_error = str(exc)
         model_info = {}
+    credentials = _credential_status()
     return {
         "configured": configured,
         "config_error": config_error,
+        "credentials_present": credentials,
+        "missing_credentials": [key for key, present in credentials.items() if not present],
         "outputs": OUTPUT_FORMATS,
         "supported_uploads": sorted(SUPPORTED_SUFFIXES),
         "max_file_mb": MAX_FILE_BYTES // (1024 * 1024),
@@ -338,10 +363,17 @@ def bootstrap():
 
 @app.post("/api/chats")
 def create_chat(x_client_id: str | None = Header(default=None)):
+    # Creating an empty chat is a UI/session action, not an inference action.
+    # Do not initialize ML providers here: that would make the entire chat UI
+    # unusable when a provider credential is temporarily missing.
     user_id = _user_id(x_client_id)
-    _, agent = runtime.get()
-    session = agent.create_session(user_id, title="New chat")
-    return session
+    return {
+        "user_id": user_id,
+        "session_id": uuid.uuid4().hex,
+        "title": "New chat",
+        "created_at": _utcnow(),
+        "updated_at": _utcnow(),
+    }
 
 
 @app.post("/api/chats/{chat_id}/jobs")
@@ -400,11 +432,8 @@ async def create_job(
         shutil.rmtree(upload_dir, ignore_errors=True)
         raise
 
-    # Ensure the chat exists in the configured session store before the worker starts.
-    _, agent = runtime.get()
-    if agent.session_manager:
-        agent.session_manager.ensure(user_id, chat_id, title=query[:72])
-
+    # Provider/session initialization happens in the worker. The agent's invoke()
+    # path ensures the session exists once the runtime is available.
     job = JobRecord(
         job_id=job_id,
         user_id=user_id,

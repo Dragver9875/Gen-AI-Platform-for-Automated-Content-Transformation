@@ -16,6 +16,15 @@ def _env(name: str, default: str | None = None, *, required: bool = False) -> st
     return value
 
 
+def _first_env(*names: str) -> str | None:
+    """Return the first non-empty environment value from a list of aliases."""
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -184,7 +193,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        hf_token = _env("HF_TOKEN")
+        hf_token = _first_env("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 
         harrier_model = _env("HARRIER_MODEL", "microsoft/harrier-oss-v1-0.6b") or "microsoft/harrier-oss-v1-0.6b"
         harrier_api_url = _clean_endpoint(_env("HARRIER_API_URL")) or (
@@ -240,9 +249,18 @@ class Settings:
 
         return cls(
             hf_token=hf_token,
-            chroma_api_key=_env("CHROMA_API_KEY", required=True),  # type: ignore[arg-type]
-            chroma_tenant=_env("CHROMA_TENANT", required=True),  # type: ignore[arg-type]
-            chroma_database=_env("CHROMA_DATABASE", required=True),  # type: ignore[arg-type]
+            chroma_api_key=(
+                _first_env("CHROMA_API_KEY", "CHROMA_CLOUD_API_KEY")
+                or (_ for _ in ()).throw(ConfigurationError("Missing required environment variable: CHROMA_API_KEY"))
+            ),
+            chroma_tenant=(
+                _first_env("CHROMA_TENANT", "CHROMA_CLOUD_TENANT")
+                or (_ for _ in ()).throw(ConfigurationError("Missing required environment variable: CHROMA_TENANT"))
+            ),
+            chroma_database=(
+                _first_env("CHROMA_DATABASE", "CHROMA_CLOUD_DATABASE")
+                or (_ for _ in ()).throw(ConfigurationError("Missing required environment variable: CHROMA_DATABASE"))
+            ),
             chroma_collection=_env("CHROMA_COLLECTION", "document_chunks") or "document_chunks",
             harrier_api_url=harrier_api_url,
             harrier_api_key=harrier_api_key or "",

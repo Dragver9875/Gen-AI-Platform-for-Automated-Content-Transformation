@@ -50,8 +50,13 @@
   async function bootstrap() {
     try {
       const data = await api('/api/bootstrap');
-      if (data.configured) els.runtime.textContent = `Ready · ${data.max_parallel_jobs} parallel job${data.max_parallel_jobs===1?'':'s'}`;
-      else { els.runtime.textContent = 'Configuration required'; toast(data.config_error || 'Backend configuration incomplete'); }
+      if (data.configured) {
+        els.runtime.textContent = `Ready · ${data.max_parallel_jobs} parallel job${data.max_parallel_jobs===1?'':'s'}`;
+      } else {
+        const missing = (data.missing_credentials || []).join(', ');
+        els.runtime.textContent = missing ? `Missing: ${missing}` : 'Configuration required';
+        toast(missing ? `Render is not exposing: ${missing}` : (data.config_error || 'Backend configuration incomplete'));
+      }
     } catch (e) { els.runtime.textContent='Backend unavailable'; toast(e.message); }
   }
 
