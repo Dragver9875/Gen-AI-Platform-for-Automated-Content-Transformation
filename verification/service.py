@@ -138,6 +138,7 @@ class VerificationService:
         warnings: list[str] = []
         semantic: dict[str, SemanticClaimAssessment] = {}
         calls = 0
+        verifier_degraded = False
 
         items: list[dict[str, Any]] = []
         evidence_cache: dict[str, tuple[list[dict[str, Any]], str]] = {}
@@ -150,26 +151,37 @@ class VerificationService:
             batch_items = items[start : start + self.max_claims_per_call]
             if not batch_items:
                 continue
-            data = self.verifier.generate_json(
-                system_prompt=verifier_system_prompt(),
-                user_prompt=verifier_user_prompt(batch_items),
-                schema_name="semantic_verification_batch",
-                json_schema=SemanticVerificationBatch.model_json_schema(),
-                temperature=self.verification_temperature,
-                max_tokens=self.verification_max_tokens,
-            )
-            calls += 1
-            batch = SemanticVerificationBatch.model_validate(data)
-            requested = {item["claim_id"] for item in batch_items}
-            for assessment in batch.claims:
-                if assessment.claim_id not in requested:
-                    warnings.append(f"Verifier returned unknown claim_id '{assessment.claim_id}' and it was ignored.")
-                    continue
-                assessment.supported_evidence = [
-                    ref for ref in assessment.supported_evidence
-                    if ref in {b["chunk_id"] for b in evidence_cache[assessment.claim_id][0]}
-                ]
-                semantic[assessment.claim_id] = assessment
+            try:
+                data = self.verifier.generate_json(
+                    system_prompt=verifier_system_prompt(),
+                    user_prompt=verifier_user_prompt(batch_items),
+                    schema_name="semantic_verification_batch",
+                    json_schema=SemanticVerificationBatch.model_json_schema(),
+                    temperature=self.verification_temperature,
+                    max_tokens=self.verification_max_tokens,
+                )
+                calls += 1
+                batch = SemanticVerificationBatch.model_validate(data)
+                requested = {item["claim_id"] for item in batch_items}
+                for assessment in batch.claims:
+                    if assessment.claim_id not in requested:
+                        warnings.append(f"Verifier returned unknown claim_id '{assessment.claim_id}' and it was ignored.")
+                        continue
+                    assessment.supported_evidence = [
+                        ref for ref in assessment.supported_evidence
+                        if ref in {b["chunk_id"] for b in evidence_cache[assessment.claim_id][0]}
+                    ]
+                    semantic[assessment.claim_id] = assessment
+            except Exception as exc:
+                # Verification is a safety/quality gate, not a reason to lose a
+                # successfully ingested/generated result. Fail conservatively:
+                # unresolved claims become insufficient_evidence and the graph
+                # surfaces complete_with_issues instead of a hard pipeline error.
+                verifier_degraded = True
+                warnings.append(
+                    f"Semantic verifier unavailable or returned malformed structured output; "
+                    f"claims in this batch were marked insufficient_evidence: {exc}"
+                )
 
         results: list[ClaimVerification] = []
         for claim in crr.claims:
@@ -250,6 +262,7 @@ class VerificationService:
             "claims_verified": total,
             "verification_profile": profile.name,
             "verification_threshold": threshold,
+            "verification_degraded": verifier_degraded,
         }
 
     def repair(self, state: dict[str, Any], report: VerificationReport) -> tuple[CanonicalResponse, list[str], dict[str, Any]]:

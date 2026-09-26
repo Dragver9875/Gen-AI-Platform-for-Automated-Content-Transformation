@@ -91,7 +91,7 @@ def _settings_summary(settings: Settings) -> list[dict[str, str]]:
     return [
         {"Capability": "Embeddings", "Provider / model": f"HF · {settings.harrier_model}", "Configured": "yes"},
         {"Capability": "Document parsing", "Provider / model": "PyMuPDF + python-pptx", "Configured": "yes"},
-        {"Capability": "Visual routing", "Provider / model": f"HF · {settings.siglip_model}", "Configured": "yes"},
+        {"Capability": "Visual routing", "Provider / model": (f"HF SigLIP · {settings.siglip_model}" if settings.siglip_enabled else "VLM router + document precheck"), "Configured": "yes"},
         {"Capability": "Visual understanding", "Provider / model": f"HF · {settings.vlm_model} (fallbacks: {', '.join(settings.vlm_fallback_models) or 'none'})", "Configured": "yes"},
         {"Capability": "Generation / verifier", "Provider / model": f"HF · {settings.llm_model}", "Configured": "yes" if settings.llm_api_url else "no"},
         {"Capability": "Reranker", "Provider / model": settings.reranker_model, "Configured": "yes" if settings.reranker_api_url else "no (RRF only)"},

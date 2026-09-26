@@ -99,8 +99,22 @@ class HostedLLMProvider:
                     output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
                     metadata={"model": self.model or "", "response_mode": mode},
                 )
-            text = self._extract_text(response_data)
-            return self._parse_json(text)
+            try:
+                text = self._extract_text(response_data).strip()
+                if not text:
+                    raise ProviderError("LLM returned an empty structured response")
+                return self._parse_json(text)
+            except ProviderError as exc:
+                failures.append(f"{mode}: {exc}")
+                # A provider may accept response_format but still return empty,
+                # markdown, or non-JSON content. Treat that exactly like an
+                # unsupported structured-output mode and try the less specific
+                # request shape before failing the pipeline.
+                if self.api_style == "openai" and mode != "prompt_only":
+                    continue
+                raise ProviderError(
+                    "All structured-output request modes failed: " + " | ".join(failures)
+                ) from exc
 
         raise ProviderError("All structured-output request modes failed: " + " | ".join(failures))
 
@@ -235,8 +249,26 @@ class HostedLLMProvider:
             choice = data["choices"][0]
             if isinstance(choice, dict):
                 message = choice.get("message")
-                if isinstance(message, dict) and isinstance(message.get("content"), str):
-                    return message["content"]
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        parts: list[str] = []
+                        for item in content:
+                            if isinstance(item, str):
+                                parts.append(item)
+                            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                                parts.append(item["text"])
+                        if parts:
+                            return "\n".join(parts)
+                    # Some OpenAI-compatible providers put schema-constrained
+                    # arguments in a tool call rather than message.content.
+                    tool_calls = message.get("tool_calls")
+                    if isinstance(tool_calls, list) and tool_calls:
+                        function = tool_calls[0].get("function") if isinstance(tool_calls[0], dict) else None
+                        if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                            return function["arguments"]
                 if isinstance(choice.get("text"), str):
                     return choice["text"]
 

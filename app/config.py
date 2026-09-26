@@ -125,7 +125,8 @@ class Settings:
     reranker_api_style: str
     reranker_model: str
 
-    # SigLIP routing. By default uses Hugging Face InferenceClient + HF_TOKEN.
+    # Optional SigLIP routing. Disabled by default because serverless availability is inconsistent.
+    siglip_enabled: bool
     siglip_api_url: str | None
     siglip_api_key: str
     siglip_model: str
@@ -230,9 +231,12 @@ class Settings:
         # All hosted ML services reuse HF_TOKEN on Hugging Face infrastructure.
         # Native PDF/PPTX parsing is deterministic and does not require a document-model endpoint.
 
+        siglip_enabled = _env_bool("SIGLIP_ENABLED", False)
         siglip_model = _env("SIGLIP_MODEL", "google/siglip-so400m-patch14-384") or "google/siglip-so400m-patch14-384"
         siglip_api_url = _clean_endpoint(_env("SIGLIP_API_URL"))
-        if siglip_api_url:
+        if not siglip_enabled:
+            siglip_api_key = _env("SIGLIP_API_KEY") or ""
+        elif siglip_api_url:
             siglip_api_key = _provider_key(
                 "SIGLIP_API_KEY",
                 api_url=siglip_api_url,
@@ -329,6 +333,7 @@ class Settings:
             reranker_api_key=reranker_api_key,
             reranker_api_style=(_env("RERANKER_API_STYLE", "hf_tei") or "hf_tei").lower(),
             reranker_model=_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3") or "BAAI/bge-reranker-v2-m3",
+            siglip_enabled=siglip_enabled,
             siglip_api_url=siglip_api_url,
             siglip_api_key=siglip_api_key or "",
             siglip_model=siglip_model,

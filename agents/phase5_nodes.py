@@ -18,7 +18,9 @@ class Phase5Nodes:
             verification_metadata.update(metadata)
             return {
                 "verification_report": report.model_dump(mode="json"),
-                "verification_requires_repair": report.requires_repair,
+                "verification_requires_repair": (
+                    report.requires_repair and not bool(metadata.get("verification_degraded"))
+                ),
                 "verification_metadata": verification_metadata,
                 "warnings": list(dict.fromkeys(list(state.get("warnings") or []) + warnings)),
                 "max_repair_attempts": self.verifier.max_repair_attempts,

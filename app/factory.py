@@ -38,17 +38,18 @@ from verification.service import VerificationService
 
 def build_provider_registry(settings: Settings, *, include_generation: bool = False, include_image_generation: bool = False) -> ProviderRegistry:
     registry = ProviderRegistry()
-    registry.register(
-        ProviderCapability.VISUAL_ROUTING,
-        SigLIPRoutingProvider(
-            settings.siglip_api_key,
-            model=settings.siglip_model,
-            api_url=settings.siglip_api_url,
-            timeout_s=settings.http_timeout_s,
-            retries=settings.http_retries,
-        ),
-        name="siglip",
-    )
+    if settings.siglip_enabled:
+        registry.register(
+            ProviderCapability.VISUAL_ROUTING,
+            SigLIPRoutingProvider(
+                settings.siglip_api_key,
+                model=settings.siglip_model,
+                api_url=settings.siglip_api_url,
+                timeout_s=settings.http_timeout_s,
+                retries=settings.http_retries,
+            ),
+            name="siglip",
+        )
     registry.register(
         ProviderCapability.VISUAL_UNDERSTANDING,
         VLMProvider(
@@ -137,7 +138,7 @@ def build_provider_registry(settings: Settings, *, include_generation: bool = Fa
 
 def build_phase12(settings: Settings, *, providers: ProviderRegistry | None = None):
     providers = providers or build_provider_registry(settings)
-    siglip = providers.resolve(ProviderCapability.VISUAL_ROUTING)
+    siglip = providers.resolve(ProviderCapability.VISUAL_ROUTING, required=False)
     vlm = providers.resolve(ProviderCapability.VISUAL_UNDERSTANDING)
     embedder = providers.resolve(ProviderCapability.EMBEDDING)
     reranker = providers.resolve(ProviderCapability.RERANKING, required=False)

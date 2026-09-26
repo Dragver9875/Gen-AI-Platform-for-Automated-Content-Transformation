@@ -39,9 +39,11 @@ class FakeVLM:
         return [{"label": "photograph", "score": 1.0}]
 
 
-def make_router(*, siglip=None, vlm=None):
+_DEFAULT_SIGLIP = object()
+
+def make_router(*, siglip=_DEFAULT_SIGLIP, vlm=None):
     return IngestionRouter(
-        siglip=siglip or FakeSiglip(),
+        siglip=FakeSiglip() if siglip is _DEFAULT_SIGLIP else siglip,
         vlm=vlm or FakeVLM(),
         pdf_preflight=PdfPreflight(native_text_chars=40, image_coverage_threshold=0.7),
     )
@@ -189,3 +191,12 @@ def test_generic_filename_page_photo_detected_from_layout(tmp_path: Path):
     result = make_router(siglip=FakeSiglip("photograph"), vlm=FakeVLM()).ingest(path)
     assert result.strategy.startswith("image-document:document page")
     assert result.provider_metadata["routing_source"] == "document_precheck"
+
+
+def test_siglip_disabled_routes_with_vlm_without_warning(tmp_path: Path):
+    image = tmp_path / "photo.png"
+    image.write_bytes(b"fake-image")
+    result = make_router(siglip=None, vlm=FakeVLM()).ingest(image)
+    assert result.strategy.startswith("image-visual:photograph")
+    assert result.provider_metadata["routing_source"] == "vlm_router"
+    assert not any("SigLIP" in warning for warning in result.warnings)

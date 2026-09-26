@@ -34,8 +34,8 @@ class IngestionRouter:
         send those page images to the configured HF-compatible VLM.
       * PPTX: deterministic text/table/chart extraction with python-pptx; embedded
         pictures are described by the VLM.
-      * Images: SigLIP is only a lightweight router. Document-like images and
-        natural images are both understood by the VLM with different prompts.
+      * Images: a deterministic document-page precheck runs first. SigLIP is optional;
+        when disabled/unavailable, the configured VLM performs the lightweight routing.
 
     This deliberately avoids Granite Docling as a serverless default because that
     checkpoint may exist on the Hub without being deployed by an Inference Provider.
@@ -44,7 +44,7 @@ class IngestionRouter:
     def __init__(
         self,
         *,
-        siglip: SigLIPRoutingProvider,
+        siglip: SigLIPRoutingProvider | None,
         vlm: VLMProvider,
         pdf_preflight: PdfPreflight,
         enable_pdf_visual_fallback: bool = True,
@@ -368,13 +368,19 @@ class IngestionRouter:
             predictions = [{"label": "document page", "score": assessment.score}]
             routing_source = "document_precheck"
         else:
-            routing_source = "siglip"
-            try:
-                predictions = self.siglip.classify(path)
-            except Exception as exc:
-                warnings.append(f"SigLIP routing unavailable; used VLM fallback: {exc}")
+            if self.siglip is None:
                 predictions = self.vlm.classify_file(path, list(DEFAULT_VISUAL_LABELS))
-                routing_source = "vlm_fallback"
+                routing_source = "vlm_router"
+            else:
+                routing_source = "siglip"
+                try:
+                    predictions = self.siglip.classify(path)
+                except Exception as exc:
+                    # SigLIP is an optimization only. A routing failure must not
+                    # poison ingestion; use the already-required multimodal VLM.
+                    warnings.append(f"SigLIP routing unavailable; used VLM fallback: {exc}")
+                    predictions = self.vlm.classify_file(path, list(DEFAULT_VISUAL_LABELS))
+                    routing_source = "vlm_fallback"
 
         top_label = str(predictions[0]["label"]).lower() if predictions else "other visual"
 

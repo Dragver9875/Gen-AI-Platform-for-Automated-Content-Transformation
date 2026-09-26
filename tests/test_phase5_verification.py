@@ -269,3 +269,30 @@ def test_deterministic_literal_validator_flags_clear_percentage_conflict():
         "The report says incidents increased by 32%.",
     )
     assert any(issue.kind == "numeric_conflict" and issue.severity == "conflict" for issue in issues)
+
+
+class BrokenVerifierLLM:
+    def generate_json(self, **kwargs):
+        raise RuntimeError("malformed structured output")
+
+
+def test_verifier_failure_degrades_to_complete_with_issues(tmp_path):
+    pipeline = FakePipeline()
+    generator = GenerationService(GenerationLLM())
+    verifier = VerificationService(
+        BrokenVerifierLLM(),
+        repair_generator=RepairLLM(),
+        max_repair_attempts=2,
+        min_faithfulness_score=1.0,
+    )
+    graph = build_phase5_graph(pipeline, generator, verifier, default_top_k=5, context_max_chars=10000)
+    agent = Phase5Orchestrator(
+        graph, session_manager=UserSessionManager(InMemorySessionStore()),
+        pipeline=pipeline, max_repair_attempts=2,
+    )
+    state = run(agent, tmp_path)
+    assert state["status"] == "phase5_complete_with_issues"
+    assert state["verification_report"]["insufficient_evidence_claims"] == 1
+    assert state["verification_metadata"]["verification_degraded"] is True
+    assert state["repair_attempts"] == 0
+    assert any("Semantic verifier unavailable" in warning for warning in state["warnings"])

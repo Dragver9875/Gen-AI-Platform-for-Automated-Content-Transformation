@@ -635,3 +635,9 @@ For local benchmarking the default session backend is in-memory. Use PostgreSQL 
 ```
 
 PostgreSQL extras are isolated in `requirements-postgres.txt`; the base runtime no longer installs them unnecessarily.
+
+### Image routing reliability
+
+`SIGLIP_ENABLED=false` is now the default. The local document-page heuristic runs first; ambiguous images are classified by the already-required VLM. Set `SIGLIP_ENABLED=true` only when a working SigLIP endpoint/provider is available. A SigLIP failure never blocks ingestion.
+
+Phase 5 structured verification now retries JSON-schema → JSON-object → prompt-only output when a provider returns malformed/empty structured content. If all verifier modes fail, claims are conservatively marked `insufficient_evidence` and the run completes with issues instead of aborting the whole pipeline.

@@ -48,8 +48,9 @@ def test_single_hf_token_configures_hf_model_layer(monkeypatch):
     assert settings.verifier_api_url is None
     assert settings.verifier_api_key is None
 
-    # Visual providers have real Hugging Face defaults; no endpoint URLs are required.
-    assert settings.siglip_api_key == "hf_test_token"
+    # SigLIP is optional and disabled by default; VLM routing remains available.
+    assert settings.siglip_enabled is False
+    assert settings.siglip_api_key == ""
     assert settings.siglip_api_url is None
     assert settings.siglip_model == "google/siglip-so400m-patch14-384"
     assert settings.vlm_api_key == "hf_test_token"
@@ -118,3 +119,12 @@ def test_placeholder_vlm_endpoint_is_ignored_and_hf_router_is_used(monkeypatch):
 
     assert settings.vlm_api_url == "https://router.huggingface.co/v1/chat/completions"
     assert settings.vlm_api_key == "hf_test_token"
+
+
+def test_siglip_can_be_enabled_explicitly_with_shared_hf_token(monkeypatch):
+    values = dict(BASE_ENV)
+    values["SIGLIP_ENABLED"] = "true"
+    _set_env(monkeypatch, values)
+    settings = Settings.from_env()
+    assert settings.siglip_enabled is True
+    assert settings.siglip_api_key == "hf_test_token"

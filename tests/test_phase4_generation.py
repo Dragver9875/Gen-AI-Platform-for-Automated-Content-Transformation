@@ -195,3 +195,38 @@ def test_transformation_config_is_open_ended():
 def test_llm_json_parser_handles_code_fence():
     data = HostedLLMProvider._parse_json('```json\n{"ok": true}\n```')
     assert data == {"ok": True}
+
+
+def test_llm_structured_generation_falls_back_when_first_response_is_malformed():
+    provider = HostedLLMProvider(
+        "https://router.huggingface.co/v1/chat/completions",
+        "hf_test",
+        api_style="openai",
+        model="test-model",
+        response_mode="json_schema",
+    )
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+        def json(self):
+            return self.payload
+
+    calls = []
+    def fake_request(method, url, **kwargs):
+        calls.append(kwargs["json"].get("response_format", {}).get("type", "prompt_only"))
+        if len(calls) == 1:
+            return Response({"choices": [{"message": {"content": ""}}]})
+        return Response({"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    provider.http.request = fake_request
+    data = provider.generate_json(
+        system_prompt="Return JSON",
+        user_prompt="test",
+        schema_name="x",
+        json_schema={"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
+        temperature=0.0,
+        max_tokens=100,
+    )
+    assert data == {"ok": True}
+    assert calls[:2] == ["json_schema", "json_object"]
